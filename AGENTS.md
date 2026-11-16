@@ -28,3 +28,6 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+# AGENTS
+- GitHub access uses the builder-owned GitHub connector via gateway in src/lib/github.functions.ts; commits go through Git Data API (blobs→tree→commit→force ref update) so ZIP replace/merge and patches are single atomic commits.
+- ZIP parsing and patch application run in the browser (src/lib/repo-files.ts) to keep server work small.

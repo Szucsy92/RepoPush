@@ -153,3 +153,35 @@
     color: var(--color-foreground);
   }
 }
+
+/* repopush dark terminal theme */
+:root {
+  --background: oklch(0.17 0.01 250);
+  --foreground: oklch(0.93 0.01 250);
+  --card: oklch(0.21 0.012 250);
+  --card-foreground: oklch(0.93 0.01 250);
+  --popover: oklch(0.21 0.012 250);
+  --popover-foreground: oklch(0.93 0.01 250);
+  --primary: oklch(0.82 0.17 145);
+  --primary-foreground: oklch(0.17 0.02 145);
+  --secondary: oklch(0.28 0.015 250);
+  --secondary-foreground: oklch(0.93 0.01 250);
+  --muted: oklch(0.25 0.012 250);
+  --muted-foreground: oklch(0.68 0.015 250);
+  --accent: oklch(0.26 0.03 145);
+  --accent-foreground: oklch(0.93 0.01 250);
+  --destructive: oklch(0.65 0.2 25);
+  --border: oklch(0.3 0.015 250);
+  --input: oklch(0.3 0.015 250);
+  --ring: oklch(0.82 0.17 145);
+}
+.field {
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 0.6rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+.field:focus { border-color: var(--ring); }

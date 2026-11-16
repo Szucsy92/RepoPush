@@ -293,8 +293,8 @@ function Index() {
                 {x.jobs.map((j) => (
                   <div key={j.name} className="pl-3 text-muted-foreground">
                     <span className={dot(j.status, j.conclusion)}>●</span> {j.name}
-                    {j.status !== "completed" && j.steps.find((s) => s.status === "in_progress") && <> · {j.steps.find((s) => s.status === "in_progress")!.name}</>}
-                    {j.steps.length > 0 && <> · {j.steps.filter((s) => s.status === "completed").length}/{j.steps.length}</>}
+                    {j.status !== "completed" && j.steps.find((s: { status: string }) => s.status === "in_progress") && <> · {j.steps.find((s: { status: string }) => s.status === "in_progress")!.name}</>}
+                    {j.steps.length > 0 && <> · {j.steps.filter((s: { status: string }) => s.status === "completed").length}/{j.steps.length}</>}
                   </div>
                 ))}
               </div>

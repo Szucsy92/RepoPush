@@ -72,7 +72,21 @@ export const getFiles = createServerFn({ method: "POST" })
     return out;
   });
 
-type FileOp = { path: string; base64?: string; delete?: boolean };
+type FileOp = { path: string; base64?: string; sha?: string; delete?: boolean };
+
+export const uploadBlobs = createServerFn({ method: "POST" })
+  .inputValidator((d: { repo: string; files: { path: string; base64: string }[] }) => d)
+  .handler(async ({ data }) => {
+    return Promise.all(
+      data.files.map(async (f) => {
+        const b = await gh<{ sha: string }>(`repos/${data.repo}/git/blobs`, {
+          method: "POST",
+          body: JSON.stringify({ content: f.base64, encoding: "base64" }),
+        });
+        return { path: f.path, sha: b.sha };
+      }),
+    );
+  });
 
 export const commitFiles = createServerFn({ method: "POST" })
   .inputValidator((d: { repo: string; branch: string; message: string; mode: "replace" | "merge"; files: FileOp[] }) => d)
@@ -113,10 +127,12 @@ export const commitFiles = createServerFn({ method: "POST" })
     const worker = async () => {
       while (i < writes.length) {
         const f = writes[i++]!;
-        const b = await gh<{ sha: string }>(`repos/${repo}/git/blobs`, {
-          method: "POST",
-          body: JSON.stringify({ content: f.base64 ?? "", encoding: "base64" }),
-        });
+        const b = f.sha
+          ? { sha: f.sha }
+          : await gh<{ sha: string }>(`repos/${repo}/git/blobs`, {
+              method: "POST",
+              body: JSON.stringify({ content: f.base64 ?? "", encoding: "base64" }),
+            });
         const exec = /\.(sh|bash)$/.test(f.path) || f.path.startsWith("bin/");
         tree.push({ path: f.path, mode: exec ? "100755" : "100644", type: "blob", sha: b.sha });
       }

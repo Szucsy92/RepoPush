@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { getMe, listRepos, listBranches, getFiles, commitFiles } from "@/lib/github.functions";
+import { getMe, listRepos, listBranches, getFiles, commitFiles, uploadBlobs } from "@/lib/github.functions";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 
 export const Route = createFileRoute("/")({
@@ -26,6 +26,10 @@ function Index() {
   const branchesFn = useServerFn(listBranches);
   const filesFn = useServerFn(getFiles);
   const commitFn = useServerFn(commitFiles);
+  const blobsFn = useServerFn(uploadBlobs);
+  const [stage, setStage] = useState<0 | 1 | 2 | 3 | -1>(0);
+  const [pct, setPct] = useState(0);
+  const [step, setStep] = useState("");
 
   const [me, setMe] = useState<{ login: string; avatar: string } | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -82,33 +86,52 @@ function Index() {
   async function run() {
     if (!repo || !branch) return add("Válassz repót és ágat.");
     setBusy(true);
+    setStage(1); setPct(0); setStep("Előkészítés"); setLog([]);
+    add(`START → ${repo}@${branch}`);
     try {
       if (tab === "zip") {
         if (!zipFiles.length) throw new Error("Nincs ZIP betöltve.");
         add(`Feltöltés: ${zipFiles.length} fájl → ${repo}@${branch} (${mode === "replace" ? "teljes csere" : "beillesztés"})`);
+        setStage(2);
+        const done: { path: string; sha: string }[] = [];
+        const B = 20;
+        for (let k = 0; k < zipFiles.length; k += B) {
+          const batch = zipFiles.slice(k, k + B);
+          setStep(`Fájlok küldése ${k + batch.length}/${zipFiles.length}`);
+          done.push(...(await blobsFn({ data: { repo, files: batch } })));
+          batch.forEach((f) => add(`  ↑ ${f.path}`));
+          setPct(Math.round(((k + batch.length) / zipFiles.length) * 90));
+        }
+        setStep("Commit létrehozása és ág frissítése");
+        add("Commit létrehozása…");
         const r = await commitFn({
-          data: { repo, branch, mode, message: message || `Upload ${zipName}`, files: zipFiles.map((f) => ({ path: f.path, base64: f.base64 })) },
+          data: { repo, branch, mode, message: message || `Upload ${zipName}`, files: done },
         });
-        add(`Kész ✔ ${r.count} fájl · ${r.url}`);
+        add(`FINISH ✔ ${r.count} fájl · ${r.url}`);
       } else {
         const t = patchTargets(patch);
         if (!t.length) throw new Error("A patch nem tartalmaz fájlt.");
         const paths = [...new Set(t.map((x) => x.oldPath).filter(Boolean) as string[])];
+        setStage(2); setStep("Eredeti fájlok letöltése"); setPct(20);
         add(`Patch: ${t.length} fájl, eredeti tartalom letöltése…`);
         const src = await filesFn({ data: { repo, branch, paths } });
         const { ops, errors } = applyPatchText(patch, src);
         errors.forEach((e) => add(e));
         if (errors.length) throw new Error("A patch nem minden része illeszthető, semmi sem lett feltöltve.");
+        ops.forEach((o) => add(`  ${o.delete ? "−" : "~"} ${o.path}`));
+        setStep("Commit létrehozása és ág frissítése"); setPct(70);
         const r = await commitFn({
           data: {
             repo, branch, mode: "merge", message: message || "Apply patch",
             files: ops.map((o) => (o.delete ? { path: o.path, delete: true } : { path: o.path, base64: toBase64(o.content ?? "") })),
           },
         });
-        add(`Kész ✔ ${r.count} módosítás · ${r.url}`);
+        add(`FINISH ✔ ${r.count} módosítás · ${r.url}`);
       }
+      setStage(3); setPct(100); setStep("Kész");
     } catch (e: any) {
-      add(`Hiba: ${e.message ?? e}`);
+      add(`HIBA ✖ ${e.message ?? e}`);
+      setStage(-1); setStep("Megszakadt");
     } finally {
       setBusy(false);
     }
@@ -147,7 +170,7 @@ function Index() {
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
               onDrop={(e) => { e.preventDefault(); setDrag(false); onZip(e.dataTransfer.files[0]); }}
-              className={`flex min-h-0 flex-1 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border"}`}
+              className={`flex h-20 shrink-0 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border"}`}
             >
               <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => onZip(e.target.files?.[0])} />
               <div className="truncate font-mono text-sm">{zipName || "ZIP behúzása / tallózás"}</div>
@@ -165,7 +188,7 @@ function Index() {
               onChange={(e) => setPatch(e.target.value)}
               placeholder="Diff / patch beillesztése vagy .patch fájl behúzása"
               onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
-              className="field min-h-0 flex-1 resize-none font-mono text-xs"
+              className="field h-28 shrink-0 resize-none font-mono text-xs"
             />
             {targets.length > 0 && (
               <div className="truncate font-mono text-xs text-muted-foreground">
@@ -179,8 +202,26 @@ function Index() {
         <button disabled={busy || !repo} onClick={run} className="truncate rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
         </button>
-        <pre className="h-16 shrink-0 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
-          {log.length ? [...log].reverse().join("\n") : "Napló…"}
+        <div className="shrink-0 space-y-1.5">
+          <div className="flex items-center gap-1 font-mono text-[11px]">
+            {["Start", "Process", "Finish"].map((n, k) => {
+              const st = k + 1;
+              const cls = stage === -1 && st >= 2 ? "border-destructive text-destructive" : stage > st || (stage === 3 && st === 3) ? "border-primary bg-primary text-primary-foreground" : stage === st ? "border-primary text-primary animate-pulse" : "border-border text-muted-foreground";
+              return (
+                <div key={n} className="flex flex-1 items-center gap-1">
+                  <div className={`flex-1 rounded border px-2 py-1 text-center ${cls}`}>{n}</div>
+                  {k < 2 && <span className="text-muted-foreground">→</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div className="h-1.5 overflow-hidden rounded bg-muted">
+            <div className={`h-full transition-all ${stage === -1 ? "bg-destructive" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+          </div>
+          <div className="truncate font-mono text-[11px] text-muted-foreground">{step || "Várakozás"}{pct ? ` · ${pct}%` : ""}</div>
+        </div>
+        <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
+          {log.length ? log.join("\n") : "Napló…"}
         </pre>
       </div>
     </main>

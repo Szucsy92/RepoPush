@@ -115,126 +115,76 @@ function Index() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="font-mono text-lg font-bold tracking-tight">
-            <span className="text-primary">›</span> repopush
-          </div>
-          {me ? (
-            <div className="flex items-center gap-2 font-mono text-sm text-muted-foreground">
-              <img src={me.avatar} alt="" className="h-7 w-7 rounded-full" /> {me.login}
-            </div>
-          ) : (
-            <span className="font-mono text-sm text-muted-foreground">kapcsolódás…</span>
-          )}
+    <main className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex items-center justify-between border-b border-border px-3 py-2">
+        <div className="font-mono font-bold"><span className="text-primary">›</span> repopush</div>
+        <div className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+          {me ? <><img src={me.avatar} alt="" className="h-5 w-5 rounded-full" />{me.login}</> : "kapcsolódás…"}
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[320px_1fr]">
-        <aside className="space-y-3">
-          <Label>Repó</Label>
-          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Keresés…" className="field" />
-          <div className="max-h-[420px] overflow-auto rounded-md border border-border">
-            {shown.map((r) => (
-              <button
-                key={r.full_name}
-                onClick={() => setRepo(r.full_name)}
-                className={`block w-full truncate px-3 py-2 text-left font-mono text-sm transition-colors hover:bg-accent ${repo === r.full_name ? "bg-primary text-primary-foreground hover:bg-primary" : ""}`}
-              >
-                {r.private ? "🔒 " : ""}{r.full_name}
-              </button>
-            ))}
-            {!repos.length && <div className="p-3 text-sm text-muted-foreground">Betöltés…</div>}
-          </div>
-          <Label>Ág</Label>
-          <input list="branches" value={branch} onChange={(e) => setBranch(e.target.value)} className="field" placeholder="main" />
+      <div className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 p-3">
+        <div className="flex gap-2">
+          <select value={repo} onChange={(e) => setRepo(e.target.value)} className="field min-w-0 flex-[2] font-mono text-xs">
+            <option value="">{repos.length ? "Repó…" : "Betöltés…"}</option>
+            {repos.map((r) => <option key={r.full_name} value={r.full_name}>{r.private ? "🔒 " : ""}{r.full_name.split("/")[1]}</option>)}
+          </select>
+          <input list="branches" value={branch} onChange={(e) => setBranch(e.target.value)} className="field min-w-0 flex-1 font-mono text-xs" placeholder="ág" />
           <datalist id="branches">{branches.map((b) => <option key={b} value={b} />)}</datalist>
-          <p className="text-xs text-muted-foreground">Új ág nevét is beírhatod – létrejön.</p>
-        </aside>
+        </div>
 
-        <section className="space-y-5">
-          <div className="flex gap-1 rounded-md border border-border p-1 font-mono text-sm">
-            {(["zip", "patch"] as const).map((t) => (
-              <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded px-3 py-2 ${tab === t ? "bg-secondary text-secondary-foreground" : "text-muted-foreground"}`}>
-                {t === "zip" ? "ZIP feltöltés" : "Patch / Diff"}
-              </button>
-            ))}
-          </div>
+        <div className="flex gap-1 rounded-md border border-border p-0.5 font-mono text-xs">
+          {(["zip", "patch"] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded px-2 py-1.5 ${tab === t ? "bg-secondary text-secondary-foreground" : "text-muted-foreground"}`}>
+              {t === "zip" ? "ZIP" : "Patch / Diff"}
+            </button>
+          ))}
+        </div>
 
-          {tab === "zip" ? (
-            <>
-              <label
-                onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-                onDragLeave={() => setDrag(false)}
-                onDrop={(e) => { e.preventDefault(); setDrag(false); onZip(e.dataTransfer.files[0]); }}
-                className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-12 text-center transition-colors ${drag ? "border-primary bg-accent" : "border-border hover:border-primary"}`}
-              >
-                <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => onZip(e.target.files?.[0])} />
-                <div className="font-mono text-lg">{zipName || "Húzd ide a ZIP-et vagy kattints"}</div>
-                <div className="mt-1 text-sm text-muted-foreground">
-                  {zipFiles.length ? `${zipFiles.length} fájl · a közös gyökérmappa automatikusan levágva` : "Letöltött repó szerkezet (pl. repo-main/…)"}
-                </div>
-              </label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <ModeBtn on={mode === "replace"} onClick={() => setMode("replace")} title="Teljes csere" sub="A repó pontosan a ZIP tartalma lesz, ami nincs benne, törlődik." />
-                <ModeBtn on={mode === "merge"} onClick={() => setMode("merge")} title="Beillesztés" sub="A ZIP fájljai felülírnak/hozzáadódnak, a többi marad." />
+        {tab === "zip" ? (
+          <>
+            <label
+              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={(e) => { e.preventDefault(); setDrag(false); onZip(e.dataTransfer.files[0]); }}
+              className={`flex min-h-0 flex-1 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border"}`}
+            >
+              <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => onZip(e.target.files?.[0])} />
+              <div className="truncate font-mono text-sm">{zipName || "ZIP behúzása / tallózás"}</div>
+              <div className="text-xs text-muted-foreground">{zipFiles.length ? `${zipFiles.length} fájl` : "letöltött repó szerkezet"}</div>
+            </label>
+            <div className="flex gap-1 rounded-md border border-border p-0.5 font-mono text-xs">
+              <button onClick={() => setMode("replace")} title="Ami nincs a ZIP-ben, törlődik" className={`flex-1 rounded px-2 py-1.5 ${mode === "replace" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Teljes csere</button>
+              <button onClick={() => setMode("merge")} title="A többi fájl marad" className={`flex-1 rounded px-2 py-1.5 ${mode === "merge" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Beillesztés</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <textarea
+              value={patch}
+              onChange={(e) => setPatch(e.target.value)}
+              placeholder="Diff / patch beillesztése vagy .patch fájl behúzása"
+              onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
+              className="field min-h-0 flex-1 resize-none font-mono text-xs"
+            />
+            {targets.length > 0 && (
+              <div className="truncate font-mono text-xs text-muted-foreground">
+                {targets.length} fájl: {targets.map((t) => t.newPath ?? t.oldPath).join(", ")}
               </div>
-              {zipFiles.length > 0 && (
-                <div className="max-h-56 overflow-auto rounded-md border border-border bg-card p-3 font-mono text-xs text-muted-foreground">
-                  {zipFiles.map((f) => <div key={f.path}>{f.path}</div>)}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <textarea
-                value={patch}
-                onChange={(e) => setPatch(e.target.value)}
-                placeholder="Illeszd be a unified diff / git patch tartalmát, vagy húzz ide .patch / .diff fájlt"
-                onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
-                className="field h-72 font-mono text-xs"
-              />
-              {targets.length > 0 && (
-                <div className="rounded-md border border-border bg-card p-3 font-mono text-xs">
-                  {targets.map((t, k) => (
-                    <div key={k}>
-                      {!t.oldPath ? <span className="text-primary">+ új </span> : !t.newPath ? <span className="text-destructive">− töröl </span> : t.oldPath !== t.newPath ? "↦ átnevez " : "~ módosít "}
-                      {t.newPath ?? t.oldPath} {t.oldPath && t.newPath && t.oldPath !== t.newPath ? `(← ${t.oldPath})` : ""}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+            )}
+          </>
+        )}
 
-          <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit üzenet (opcionális)" className="field" />
-          <button
-            disabled={busy || !repo}
-            onClick={run}
-            className="w-full rounded-md bg-primary px-4 py-3 font-mono font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-          >
-            {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${repo}@${branch}` : "Válassz repót"}
-          </button>
-
-          <pre className="min-h-24 max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-3 font-mono text-xs text-muted-foreground">
-            {log.length ? log.join("\n") : "Napló…"}
-          </pre>
-        </section>
+        <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit üzenet (opcionális)" className="field text-xs" />
+        <button disabled={busy || !repo} onClick={run} className="truncate rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
+          {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
+        </button>
+        <pre className="h-16 shrink-0 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
+          {log.length ? [...log].reverse().join("\n") : "Napló…"}
+        </pre>
       </div>
     </main>
   );
 }
 
 function safe<T>(f: () => T, d: T): T { try { return f(); } catch { return d; } }
-function Label({ children }: { children: React.ReactNode }) {
-  return <div className="font-mono text-xs uppercase tracking-widest text-muted-foreground">{children}</div>;
-}
-function ModeBtn({ on, onClick, title, sub }: { on: boolean; onClick: () => void; title: string; sub: string }) {
-  return (
-    <button onClick={onClick} className={`rounded-md border p-3 text-left transition-colors ${on ? "border-primary bg-accent" : "border-border hover:border-primary"}`}>
-      <div className="font-mono text-sm font-bold">{title}</div>
-      <div className="text-xs text-muted-foreground">{sub}</div>
-    </button>
-  );
-}

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { getMe, listRepos, listBranches, getFiles, commitFiles, uploadBlobs } from "@/lib/github.functions";
+import { getMe, listRepos, listBranches, getFiles, commitFiles, uploadBlobs, startBuild, buildStatus, runLogs } from "@/lib/github.functions";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 
 export const Route = createFileRoute("/")({
@@ -27,6 +27,13 @@ function Index() {
   const filesFn = useServerFn(getFiles);
   const commitFn = useServerFn(commitFiles);
   const blobsFn = useServerFn(uploadBlobs);
+  const startFn = useServerFn(startBuild);
+  const statusFn = useServerFn(buildStatus);
+  const logsFn = useServerFn(runLogs);
+  type Run = Awaited<ReturnType<typeof buildStatus>>[number];
+  const [since, setSince] = useState("");
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [building, setBuilding] = useState(false);
   const [stage, setStage] = useState<0 | 1 | 2 | 3 | -1>(0);
   const [pct, setPct] = useState(0);
   const [step, setStep] = useState("");
@@ -83,10 +90,57 @@ function Index() {
     }
   }
 
+  useEffect(() => {
+    if (!since) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const r = await statusFn({ data: { repo, branch, since } });
+        if (stop) return;
+        setRuns(r);
+        const done = r.length > 0 && r.every((x) => x.status === "completed");
+        if (done) { setBuilding(false); add(`BUILD KÉSZ: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); return; }
+      } catch (e: any) { add(`Build állapot hiba: ${e.message}`); }
+      if (!stop) setTimeout(tick, 4000);
+    };
+    tick();
+    return () => { stop = true; };
+  }, [since]);
+
+  async function build() {
+    setBuilding(true); setRuns([]);
+    const t = new Date(Date.now() - 5000).toISOString().replace(/\.\d+Z$/, "Z");
+    try {
+      const r = await startFn({ data: { repo, branch } });
+      add(`BUILD START → ${r.started.length ? r.started.join(", ") : "nincs kézzel indítható workflow, a feltöltés által indítottakat követem"}`);
+      if (r.skipped.length) add(`  (kihagyva, nincs workflow_dispatch: ${r.skipped.join(", ")})`);
+      setSince(""); setTimeout(() => setSince(t), 3000);
+    } catch (e: any) { add(`Build hiba: ${e.message}`); setBuilding(false); }
+  }
+
+  async function download(x: Run) {
+    try {
+      add(`Napló letöltése: ${x.name}…`);
+      const b64 = await logsFn({ data: { repo, id: x.id } });
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+      a.download = `${repo.split("/")[1]}-${x.name.replace(/\W+/g, "_")}-${x.id}-logs.zip`;
+      a.click();
+    } catch (e: any) { add(`Napló hiba: ${e.message}`); }
+  }
+
+  function saveLog() {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([log.join("\n")], { type: "text/plain" }));
+    a.download = "repopush-naplo.txt";
+    a.click();
+  }
+
   async function run() {
     if (!repo || !branch) return add("Válassz repót és ágat.");
     setBusy(true);
-    setStage(1); setPct(0); setStep("Előkészítés"); setLog([]);
+    setStage(1); setPct(0); setStep("Előkészítés"); setLog([]); setSince(""); setRuns([]);
     add(`START → ${repo}@${branch}`);
     try {
       if (tab === "zip") {
@@ -220,12 +274,45 @@ function Index() {
           </div>
           <div className="truncate font-mono text-[11px] text-muted-foreground">{step || "Várakozás"}{pct ? ` · ${pct}%` : ""}</div>
         </div>
+        {stage === 3 && (
+          <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">
+            <div className="flex gap-1">
+              <button disabled={building} onClick={build} className="flex-1 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
+                {building ? "Build fut…" : runs.length ? "Új build" : "▶ Friss build indítása"}
+              </button>
+              <button onClick={saveLog} className="rounded border border-border px-2 py-1.5">⇩ Napló</button>
+            </div>
+            {runs.map((x) => (
+              <div key={x.id} className="space-y-0.5">
+                <div className="flex items-center gap-1">
+                  <span className={dot(x.status, x.conclusion)}>●</span>
+                  <a href={x.url} target="_blank" rel="noreferrer" className="flex-1 truncate underline">{x.name} <span className="text-muted-foreground">({x.event})</span></a>
+                  <span className="text-muted-foreground">{x.conclusion ?? x.status}</span>
+                  {x.status === "completed" && <button onClick={() => download(x)} className="rounded border border-border px-1.5">⇩ log</button>}
+                </div>
+                {x.jobs.map((j) => (
+                  <div key={j.name} className="pl-3 text-muted-foreground">
+                    <span className={dot(j.status, j.conclusion)}>●</span> {j.name}
+                    {j.status !== "completed" && j.steps.find((s) => s.status === "in_progress") && <> · {j.steps.find((s) => s.status === "in_progress")!.name}</>}
+                    {j.steps.length > 0 && <> · {j.steps.filter((s) => s.status === "completed").length}/{j.steps.length}</>}
+                  </div>
+                ))}
+              </div>
+            ))}
+            {building && !runs.length && <div className="animate-pulse text-muted-foreground">Várakozás a GitHubra…</div>}
+          </div>
+        )}
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
           {log.length ? log.join("\n") : "Napló…"}
         </pre>
       </div>
     </main>
   );
+}
+
+function dot(s: string, c: string | null) {
+  if (s !== "completed") return "text-primary animate-pulse";
+  return c === "success" ? "text-primary" : c === "skipped" || c === "cancelled" ? "text-muted-foreground" : "text-destructive";
 }
 
 function safe<T>(f: () => T, d: T): T { try { return f(); } catch { return d; } }

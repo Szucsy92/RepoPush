@@ -161,3 +161,57 @@ export const commitFiles = createServerFn({ method: "POST" })
     }
     return { sha: commit.sha, url: `https://github.com/${repo}/commit/${commit.sha}`, count: data.files.length };
   });
+
+export const startBuild = createServerFn({ method: "POST" })
+  .inputValidator((d: { repo: string; branch: string }) => d)
+  .handler(async ({ data }) => {
+    const w = await gh<{ workflows: { id: number; name: string; path: string; state: string }[] }>(`repos/${data.repo}/actions/workflows?per_page=100`);
+    const started: string[] = [];
+    const skipped: string[] = [];
+    for (const wf of w.workflows.filter((x) => x.state === "active")) {
+      try {
+        await gh(`repos/${data.repo}/actions/workflows/${wf.id}/dispatches`, { method: "POST", body: JSON.stringify({ ref: data.branch }) });
+        started.push(wf.name);
+      } catch {
+        skipped.push(wf.name);
+      }
+    }
+    return { started, skipped, total: w.workflows.length };
+  });
+
+export const buildStatus = createServerFn({ method: "POST" })
+  .inputValidator((d: { repo: string; branch: string; since: string }) => d)
+  .handler(async ({ data }) => {
+    const r = await gh<{ workflow_runs: any[] }>(
+      `repos/${data.repo}/actions/runs?branch=${encodeURIComponent(data.branch)}&created=${encodeURIComponent(">=" + data.since)}&per_page=20`,
+    );
+    return Promise.all(
+      r.workflow_runs.map(async (run) => {
+        const j = await gh<{ jobs: any[] }>(`repos/${data.repo}/actions/runs/${run.id}/jobs`);
+        return {
+          id: run.id as number, name: run.name as string, event: run.event as string,
+          status: run.status as string, conclusion: run.conclusion as string | null, url: run.html_url as string,
+          jobs: j.jobs.map((x) => ({
+            name: x.name as string, status: x.status as string, conclusion: x.conclusion as string | null,
+            steps: (x.steps ?? []).map((s: any): { name: string; status: string; conclusion: string | null } => ({ name: s.name as string, status: s.status as string, conclusion: s.conclusion as string | null })),
+          })),
+        };
+      }),
+    );
+  });
+
+export const runLogs = createServerFn({ method: "POST" })
+  .inputValidator((d: { repo: string; id: number }) => d)
+  .handler(async ({ data }) => {
+    const lk = process.env["LOVABLE_API_KEY"];
+    const gk = process.env["GITHUB_API_KEY"];
+    if (!lk || !gk) throw new Error("GitHub kapcsolat nincs beállítva");
+    const res = await fetch(`${GW}/repos/${data.repo}/actions/runs/${data.id}/logs`, {
+      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${lk}`, "X-Connection-Api-Key": gk },
+    });
+    if (!res.ok) throw new Error(`Napló letöltési hiba [${res.status}]: ${(await res.text()).slice(0, 300)}`);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    let s = "";
+    for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    return btoa(s);
+  });

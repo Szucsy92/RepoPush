@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Download } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, clearToken } from "@/lib/token";
@@ -229,6 +230,10 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   // (the API route redirects to blob storage, which the app's CSP blocks on purpose).
   const logZip = (x: Run) => `https://github.com/${repo}/suites/${x.suite}/logs`;
 
+  // Full repo ZIP of the selected branch: a plain github.com link, same reasoning as logZip
+  // (the API zipball redirects to codeload.github.com, which the app's CSP blocks on purpose).
+  const repoZip = repo && branch ? `https://github.com/${repo}/archive/refs/heads/${branch.split("/").map(encodeURIComponent).join("/")}.zip` : "";
+
   function details(x: Run) {
     add(`${x.name}: ${x.conclusion ?? x.status}`);
     x.jobs.forEach((j) => {
@@ -337,6 +342,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             <option value="">{repos.length ? "Repó…" : "Betöltés…"}</option>
             {repos.map((r) => <option key={r.full_name} value={r.full_name}>{r.private ? "🔒 " : ""}{r.full_name.split("/")[1]}</option>)}
           </select>
+          {repoZip ? (
+            <a href={repoZip} target="_blank" rel="noopener noreferrer" title={`Teljes repó letöltése (ZIP) · ${branch}`} aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-md border border-border bg-card">
+              <Download className="h-4 w-4" />
+            </a>
+          ) : (
+            <button type="button" disabled title="Válassz repót" aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-md border border-border bg-card opacity-40">
+              <Download className="h-4 w-4" />
+            </button>
+          )}
           <input list="branches" value={branch} onChange={(e) => setBranch(e.target.value)} className="field min-w-0 flex-1 font-mono text-xs" placeholder="ág" />
           <datalist id="branches">{branches.map((b) => <option key={b} value={b} />)}</datalist>
         </div>

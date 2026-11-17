@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Delete, Fingerprint } from "lucide-react";
-import { PIN_LEN, MAX_FAILS, biometricEnabled, biometricSupported, enableBiometric, getUnlockMode, lockWaitMs, sealToken, setUnlockMode, tryUnlock, unlockWithBiometric, type UnlockMode } from "@/lib/lock";
+import { PIN_LEN, MAX_FAILS, biometricEnabled, biometricSupported, enableBiometric, getUnlockMode, lastBiometricError, lockWaitMs, sealToken, setUnlockMode, tryUnlock, unlockWithBiometric, type UnlockMode } from "@/lib/lock";
 import { dropPlainToken } from "@/lib/token";
 
 function Shell({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
@@ -92,6 +92,9 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
   const [bioOn] = useState(() => biometricEnabled());
   const bioAvail = biometricSupported();
   const [enroll, setEnroll] = useState(false); // switch biometrics on with the next correct PIN
+  const [enrolling, setEnrolling] = useState(false); // the biometric prompt is open
+  const [opened, setOpened] = useState<string | null>(null); // token already decrypted, waiting for the biometric step to end
+  const [lastErr] = useState(() => lastBiometricError());
   const asked = useRef("");
 
   useEffect(() => {
@@ -105,9 +108,15 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
     const r = await tryUnlock(p);
     setBusy(false);
     if (r.ok) {
-      // Switching biometrics on must never hold the app back: open it first, the system prompt follows on top.
-      if (enroll) enableBiometric(p).then((b) => { if (!b.ok) window.alert(`A biometrikus azonosítás bekapcsolása nem sikerült: ${b.reason}`); });
-      return onUnlock(r.token);
+      if (!enroll) return onUnlock(r.token);
+      // Stay on this screen while the prompt is open, so the result (or the error text) is visible,
+      // and let the user skip it at any moment.
+      setOpened(r.token); setEnrolling(true); setErr("");
+      const b = await enableBiometric(p);
+      setEnrolling(false);
+      if (b.ok) return onUnlock(r.token);
+      setErr(`A biometrikus azonosítás bekapcsolása nem sikerült: ${b.reason}`);
+      return;
     }
     setPin("");
     if (r.wiped) { window.alert(`${MAX_FAILS} hibás PIN után a token törlődött erről az eszközről. Add meg újra.`); return onForgot(); }
@@ -133,8 +142,12 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
 
   const sw = "w-full rounded-md border border-border px-3 py-2.5 font-mono text-sm";
   return (
-    <Shell title={mode === "bio" ? "Biometrikus feloldás" : "PIN megadása"} hint={mode === "pin" && enroll ? "Add meg a PIN-t, utána bekapcsoljuk a biometrikus azonosítást." : undefined}>
-      {mode === "bio" ? (
+    <Shell title={opened !== null ? "Biometrikus azonosítás bekapcsolása" : mode === "bio" ? "Biometrikus feloldás" : "PIN megadása"} hint={opened === null && mode === "pin" && enroll ? "Add meg a PIN-t, utána bekapcsoljuk a biometrikus azonosítást." : undefined}>
+      {opened !== null ? (
+        <div className="space-y-3 text-center">
+          <div className="text-xs text-muted-foreground">{enrolling ? "Biometrikus kérés folyamatban… Erősítsd meg az ujjlenyomatoddal." : "A PIN rendben van, de a biometria bekapcsolása nem sikerült."}</div>
+        </div>
+      ) : mode === "bio" ? (
         <div className="space-y-3">
           <button onClick={viaBio} disabled={busy || wait > 0} aria-label="Biometrikus azonosítás" className="mx-auto flex h-24 w-24 items-center justify-center rounded-full border border-border bg-card active:bg-secondary disabled:opacity-40">
             <Fingerprint className="h-12 w-12 text-primary" />
@@ -144,14 +157,19 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
       ) : (
         <PinPad value={pin} onChange={setPin} disabled={busy || wait > 0} />
       )}
-      <div className="min-h-4 text-center font-mono text-xs text-destructive">{wait > 0 ? `Túl sok próbálkozás. Várj ${Math.ceil(wait / 1000)} mp-et.` : err}</div>
-      <div className="space-y-2">
-        {mode === "bio" ? <button onClick={() => choose("pin")} className={sw}>PIN megadása</button>
-          : bioOn ? <button onClick={() => choose("bio")} className={sw}>Biometrikus azonosítás</button>
-          : bioAvail ? <button onClick={() => setEnroll((e) => !e)} className={`${sw} ${enroll ? "border-primary text-primary" : ""}`}>{enroll ? "✓ Biometrikus azonosítás bekapcsolása a következő PIN-nel" : "Biometrikus azonosítás bekapcsolása"}</button>
-          : null}
-        <button onClick={() => { if (window.confirm("Kijelentkezel, és a token törlődik erről az eszközről. Utána új tokent és új PIN-t kell megadnod.")) onForgot(); }} className="mx-auto block pt-1 text-xs text-muted-foreground underline">Elfelejtett PIN · kijelentkezés</button>
-      </div>
+      <div className="min-h-4 break-words text-center font-mono text-xs text-destructive">{wait > 0 ? `Túl sok próbálkozás. Várj ${Math.ceil(wait / 1000)} mp-et.` : err}</div>
+      {opened !== null ? (
+        <button onClick={() => onUnlock(opened)} className={sw}>Tovább biometria nélkül</button>
+      ) : (
+        <div className="space-y-2">
+          {mode === "bio" ? <button onClick={() => choose("pin")} className={sw}>PIN megadása</button>
+            : bioOn ? <button onClick={() => choose("bio")} className={sw}>Biometrikus azonosítás</button>
+            : bioAvail ? <button onClick={() => setEnroll((e) => !e)} className={`${sw} ${enroll ? "border-primary text-primary" : ""}`}>{enroll ? "✓ Biometrikus azonosítás bekapcsolása a következő PIN-nel" : "Biometrikus azonosítás bekapcsolása"}</button>
+            : null}
+          {!bioOn && bioAvail && lastErr && <div className="break-words text-center font-mono text-[10px] text-muted-foreground">Legutóbbi bekapcsolási hiba: {lastErr}</div>}
+          <button onClick={() => { if (window.confirm("Kijelentkezel, és a token törlődik erről az eszközről. Utána új tokent és új PIN-t kell megadnod.")) onForgot(); }} className="mx-auto block pt-1 text-xs text-muted-foreground underline">Elfelejtett PIN · kijelentkezés</button>
+        </div>
+      )}
     </Shell>
   );
 }

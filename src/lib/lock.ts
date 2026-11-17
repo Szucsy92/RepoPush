@@ -9,6 +9,7 @@ const FREE_TRIES = 5; // after this many wrong PINs every further one adds a gro
 const VAULT = "repopush.vault";
 const FAILS = "repopush.pin_fails";
 const BIO = "repopush.bio";
+const BIO_ERR = "repopush.bio_error"; // why the last attempt to switch biometrics on failed (shown on the lock screen)
 const MODE = "repopush.unlock_mode"; // remembered choice on the lock screen: "bio" | "pin"
 const BIO_SERVER = "io.github.szucsy92.repopush";
 const ITER = 600_000;
@@ -89,41 +90,51 @@ const errText = (e: unknown): string => {
 
 // A native call that never answers must not freeze the screen that waits for it.
 const BIO_TIMEOUT_MS = 45_000;
-const withTimeout = <T>(p: Promise<T>, ms = BIO_TIMEOUT_MS): Promise<T> =>
+const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
   new Promise((res, rej) => {
-    const t = setTimeout(() => rej(new Error("időtúllépés: a rendszer nem válaszolt a biometrikus kérésre")), ms);
+    const t = setTimeout(() => rej(new Error(`időtúllépés (${Math.round(ms / 1000)} mp), a rendszer nem válaszolt`)), ms);
     p.then((v) => { clearTimeout(t); res(v); }, (e) => { clearTimeout(t); rej(e); });
   });
+/** Runs one step of the biometric flow; a failure says which step it was. */
+async function stage<T>(name: string, f: () => Promise<T>, ms = BIO_TIMEOUT_MS): Promise<T> {
+  try { return await withTimeout(f(), ms); } catch (e) { throw new Error(`${name}: ${errText(e)}`); }
+}
 
 export type BioResult = { ok: true } | { ok: false; reason: string };
 
+export const lastBiometricError = (): string => localStorage.getItem(BIO_ERR) ?? "";
+
 export async function enableBiometric(pin: string): Promise<BioResult> {
+  let device = "";
   try {
-    await withTimeout((async () => {
-      const b = await bio();
-      await b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" });
-      await b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER });
-    })());
+    const b = await stage("plugin betöltése", bio);
+    // The device's own answer is only reported, never trusted to block: the real prompt decides.
+    try { device = JSON.stringify(await stage("eszköz-ellenőrzés", () => b.isAvailable(), 8000)); } catch (e) { device = errText(e); }
+    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" }));
+    await stage("PIN mentése", () => b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER }));
     localStorage.setItem(BIO, "1");
+    localStorage.removeItem(BIO_ERR);
     setUnlockMode("bio");
     return { ok: true };
-  } catch (e) { return { ok: false, reason: errText(e) }; }
+  } catch (e) {
+    const reason = `${errText(e)} · eszköz: ${device || "?"}`;
+    try { localStorage.setItem(BIO_ERR, reason); } catch { /* nem kritikus */ }
+    return { ok: false, reason };
+  }
 }
 
 /** Asks for the fingerprint/face and returns the stored PIN, or the reason it did not work (cancelled, plugin missing…). */
 export async function unlockWithBiometric(): Promise<{ pin: string } | { reason: string }> {
   try {
-    return await withTimeout((async () => {
-      const b = await bio();
-      await b.verifyIdentity({ reason: "Feloldás", title: "RepoPush" });
-      return { pin: (await b.getCredentials({ server: BIO_SERVER })).password };
-    })());
+    const b = await stage("plugin betöltése", bio);
+    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Feloldás", title: "RepoPush" }));
+    return { pin: (await stage("PIN olvasása", () => b.getCredentials({ server: BIO_SERVER }))).password };
   } catch (e) { return { reason: errText(e) }; }
 }
 
 /** Removes the vault, the wrong-PIN counter and the biometric secret. */
 export function clearLock() {
   const hadBio = localStorage.getItem(BIO) === "1";
-  [VAULT, FAILS, BIO, MODE].forEach((k) => localStorage.removeItem(k));
+  [VAULT, FAILS, BIO, BIO_ERR, MODE].forEach((k) => localStorage.removeItem(k));
   if (hadBio && isNative()) bio().then((b) => b.deleteCredentials({ server: BIO_SERVER })).catch(() => {});
 }

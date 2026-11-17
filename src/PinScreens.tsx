@@ -103,12 +103,12 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
   async function finish(p: string) {
     setBusy(true);
     const r = await tryUnlock(p);
-    if (r.ok && enroll) { // the PIN is known now: store it behind the fingerprint
-      const b = await enableBiometric(p);
-      if (!b.ok) window.alert(`A biometrikus azonosítás bekapcsolása nem sikerült: ${b.reason}`);
-    }
     setBusy(false);
-    if (r.ok) return onUnlock(r.token);
+    if (r.ok) {
+      // Switching biometrics on must never hold the app back: open it first, the system prompt follows on top.
+      if (enroll) enableBiometric(p).then((b) => { if (!b.ok) window.alert(`A biometrikus azonosítás bekapcsolása nem sikerült: ${b.reason}`); });
+      return onUnlock(r.token);
+    }
     setPin("");
     if (r.wiped) { window.alert(`${MAX_FAILS} hibás PIN után a token törlődött erről az eszközről. Add meg újra.`); return onForgot(); }
     setWait(r.waitMs);

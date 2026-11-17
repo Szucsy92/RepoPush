@@ -87,13 +87,23 @@ const errText = (e: unknown): string => {
   return [x?.message, x?.code].filter((v) => v !== undefined && v !== "").join(" · ") || "ismeretlen hiba";
 };
 
+// A native call that never answers must not freeze the screen that waits for it.
+const BIO_TIMEOUT_MS = 45_000;
+const withTimeout = <T>(p: Promise<T>, ms = BIO_TIMEOUT_MS): Promise<T> =>
+  new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error("időtúllépés: a rendszer nem válaszolt a biometrikus kérésre")), ms);
+    p.then((v) => { clearTimeout(t); res(v); }, (e) => { clearTimeout(t); rej(e); });
+  });
+
 export type BioResult = { ok: true } | { ok: false; reason: string };
 
 export async function enableBiometric(pin: string): Promise<BioResult> {
   try {
-    const b = await bio();
-    await b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" });
-    await b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER });
+    await withTimeout((async () => {
+      const b = await bio();
+      await b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" });
+      await b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER });
+    })());
     localStorage.setItem(BIO, "1");
     setUnlockMode("bio");
     return { ok: true };
@@ -103,9 +113,11 @@ export async function enableBiometric(pin: string): Promise<BioResult> {
 /** Asks for the fingerprint/face and returns the stored PIN, or the reason it did not work (cancelled, plugin missing…). */
 export async function unlockWithBiometric(): Promise<{ pin: string } | { reason: string }> {
   try {
-    const b = await bio();
-    await b.verifyIdentity({ reason: "Feloldás", title: "RepoPush" });
-    return { pin: (await b.getCredentials({ server: BIO_SERVER })).password };
+    return await withTimeout((async () => {
+      const b = await bio();
+      await b.verifyIdentity({ reason: "Feloldás", title: "RepoPush" });
+      return { pin: (await b.getCredentials({ server: BIO_SERVER })).password };
+    })());
   } catch (e) { return { reason: errText(e) }; }
 }
 

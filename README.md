@@ -31,10 +31,10 @@ A „Token megjegyzése ezen az eszközön” kapcsolóval a token az eszközön
 
 ## Fejlesztés
 ```sh
-npm install
-npm run dev      # http://localhost:8080
-npm test
-npm run build    # dist/
+bun install      # a bun.lock ehhez készült; npm install a rolldown override miatt összeomolhat
+bun run dev      # http://localhost:8080
+bun run test
+bun run build    # dist/
 ```
 
 ## GitHub Pages

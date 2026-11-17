@@ -115,6 +115,7 @@ jobs:
           public class MainActivity extends BridgeActivity {
             @Override
             public void onCreate(Bundle savedInstanceState) {
+              registerPlugin(BiometricVaultPlugin.class);
               super.onCreate(savedInstanceState);
               View root = findViewById(android.R.id.content);
               root.setBackgroundColor(0xFF0B0F14);
@@ -127,6 +128,10 @@ jobs:
           }
           JAVA
           sed -i 's/^          //' "$MA"
+
+          # Biometrikus tár: a repóban lévő natív Capacitor plugin (Keystore + ujjlenyomat) másolása a projektbe.
+          sed "s/__PKG__/$PKG/" native/BiometricVaultPlugin.java > "$(dirname "$MA")/BiometricVaultPlugin.java"
+          printf '\ndependencies {\n    implementation "androidx.biometric:biometric:1.1.0"\n}\n' >> android/app/build.gradle
 
           # Az app tokent tárol: ne kerüljön Google-biztonsági mentésbe.
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml

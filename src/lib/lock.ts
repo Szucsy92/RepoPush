@@ -1,6 +1,7 @@
 // PIN lock. A remembered GitHub token exists on the device only as an AES-GCM vault whose key is
 // derived from a 6-digit PIN (PBKDF2). Biometrics (Android app only) never replace the PIN: they just
 // hand it back from the Keystore-backed secure store, so the PIN stays the one secret that opens the vault.
+import { registerPlugin } from "@capacitor/core";
 import { isNative } from "@/lib/native";
 
 export const PIN_LEN = 6;
@@ -11,7 +12,6 @@ const FAILS = "repopush.pin_fails";
 const BIO = "repopush.bio";
 const BIO_ERR = "repopush.bio_error"; // why the last attempt to switch biometrics on failed (shown on the lock screen)
 const MODE = "repopush.unlock_mode"; // remembered choice on the lock screen: "bio" | "pin"
-const BIO_SERVER = "io.github.szucsy92.repopush";
 const ITER = 600_000;
 
 export const validPin = (p: string) => /^\d{6}$/.test(p);
@@ -66,8 +66,16 @@ export async function tryUnlock(pin: string): Promise<Unlock> {
   return { ok: false, fails: n, waitMs, wiped: false };
 }
 
-// --- Biometrics (Capacitor app only; loaded lazily so the web build never touches the plugin) ---
-const bio = async () => (await import("capacitor-native-biometric")).NativeBiometric;
+// --- Biometrics: the in-repo native plugin "BiometricVault" (native/BiometricVaultPlugin.java) ---
+// The PIN is encrypted with an Android Keystore key that only opens right after a fingerprint
+// (BiometricPrompt with a CryptoObject). There is no such plugin in the browser: biometricSupported() is false there.
+interface BiometricVaultPlugin {
+  isAvailable(): Promise<{ available: boolean; code: number; reason: string }>;
+  store(o: { secret: string }): Promise<void>;
+  retrieve(): Promise<{ secret: string }>;
+  remove(): Promise<void>;
+}
+const Vault = registerPlugin<BiometricVaultPlugin>("BiometricVault");
 
 export const biometricEnabled = (): boolean => isNative() && localStorage.getItem(BIO) === "1";
 
@@ -95,9 +103,16 @@ const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
     const t = setTimeout(() => rej(new Error(`időtúllépés (${Math.round(ms / 1000)} mp), a rendszer nem válaszolt`)), ms);
     p.then((v) => { clearTimeout(t); res(v); }, (e) => { clearTimeout(t); rej(e); });
   });
-/** Runs one step of the biometric flow; a failure says which step it was. */
+/** Runs one step of the biometric flow; a failure says which step it was and keeps the plugin's error code. */
 async function stage<T>(name: string, f: () => Promise<T>, ms = BIO_TIMEOUT_MS): Promise<T> {
-  try { return await withTimeout(f(), ms); } catch (e) { throw new Error(`${name}: ${errText(e)}`); }
+  try {
+    return await withTimeout(f(), ms);
+  } catch (e) {
+    const x = e as { message?: string; code?: string | number } | string | undefined;
+    const err = new Error(`${name}: ${typeof x === "string" ? x : x?.message ?? "hiba"}`) as Error & { code?: string | number };
+    if (typeof x === "object" && x) err.code = x.code;
+    throw err;
+  }
 }
 
 export type BioResult = { ok: true } | { ok: false; reason: string };
@@ -105,36 +120,47 @@ export type BioResult = { ok: true } | { ok: false; reason: string };
 export const lastBiometricError = (): string => localStorage.getItem(BIO_ERR) ?? "";
 
 export async function enableBiometric(pin: string): Promise<BioResult> {
-  let device = "";
   try {
-    const b = await stage("plugin betöltése", bio);
-    // The device's own answer is only reported, never trusted to block: the real prompt decides.
-    try { device = JSON.stringify(await stage("eszköz-ellenőrzés", () => b.isAvailable(), 8000)); } catch (e) { device = errText(e); }
-    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" }));
-    await stage("PIN mentése", () => b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER }));
+    const a = await stage("eszköz-ellenőrzés", () => Vault.isAvailable(), 8000);
+    if (!a.available) throw new Error(`eszköz-ellenőrzés: ${a.reason} (kód ${a.code})`);
+    await stage("ujjlenyomat-kérés", () => Vault.store({ secret: pin }));
     localStorage.setItem(BIO, "1");
     localStorage.removeItem(BIO_ERR);
     setUnlockMode("bio");
     return { ok: true };
   } catch (e) {
-    const reason = `${errText(e)} · eszköz: ${device || "?"}`;
+    const reason = errText(e);
     try { localStorage.setItem(BIO_ERR, reason); } catch { /* nem kritikus */ }
     return { ok: false, reason };
   }
 }
 
-/** Asks for the fingerprint/face and returns the stored PIN, or the reason it did not work (cancelled, plugin missing…). */
-export async function unlockWithBiometric(): Promise<{ pin: string } | { reason: string }> {
+function forgetBiometric() {
+  localStorage.removeItem(BIO);
+  localStorage.removeItem(MODE);
+  Vault.remove().catch(() => {});
+}
+
+export type BioUnlock = { pin: string } | { reason: string; cancelled?: boolean; negative?: boolean };
+
+/** Asks for the fingerprint and returns the stored PIN, or the reason it did not work. */
+export async function unlockWithBiometric(): Promise<BioUnlock> {
   try {
-    const b = await stage("plugin betöltése", bio);
-    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Feloldás", title: "RepoPush" }));
-    return { pin: (await stage("PIN olvasása", () => b.getCredentials({ server: BIO_SERVER }))).password };
-  } catch (e) { return { reason: errText(e) }; }
+    return { pin: (await stage("ujjlenyomat-kérés", () => Vault.retrieve())).secret };
+  } catch (e) {
+    const code = String((e as { code?: unknown }).code ?? "");
+    if (code === "invalidated" || code === "empty") {
+      forgetBiometric(); // the fingerprints changed or the secret is gone: the PIN is the way in until it is switched on again
+      return { reason: `${errText(e)} — kapcsold be újra a biometrikus azonosítást, addig használd a PIN-t` };
+    }
+    // BiometricPrompt: 10 = user cancelled, 13 = the "PIN használata" button
+    return { reason: errText(e), cancelled: code === "10" || code === "13", negative: code === "13" };
+  }
 }
 
 /** Removes the vault, the wrong-PIN counter and the biometric secret. */
 export function clearLock() {
   const hadBio = localStorage.getItem(BIO) === "1";
   [VAULT, FAILS, BIO, BIO_ERR, MODE].forEach((k) => localStorage.removeItem(k));
-  if (hadBio && isNative()) bio().then((b) => b.deleteCredentials({ server: BIO_SERVER })).catch(() => {});
+  if (hadBio && isNative()) Vault.remove().catch(() => {});
 }

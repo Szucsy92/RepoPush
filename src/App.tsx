@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Download } from "lucide-react";
+import { ChevronDown, Download, RefreshCw } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
@@ -56,7 +56,12 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [logTab, setLogTab] = useState<"log" | "action">("log");
   const activeRef = useRef<Run[]>([]);
   const buildingRef = useRef(false);
-  const pokeRef = useRef<(() => void) | null>(null);
+  const pokeRef = useRef<(() => Promise<void>) | null>(null);
+  const actPhases = useRef<Record<string, string>>({});
+  const patchFile = useRef<HTMLInputElement>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState("");
+  const [activeAt, setActiveAt] = useState("");
   const [drag, setDrag] = useState(false);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
@@ -117,45 +122,58 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const panelIds = useRef<Set<number>>(new Set());
   useEffect(() => { panelIds.current = new Set(runs.map((x) => x.id)); }, [runs]);
 
-  // Futó action figyelése: csak az a futás kap „Action folyamatban” fület, ami a repó megnyitásakor
-  // (pl. az app újranyitása után) már futott. Ami az appból indult, azt a build-panel mutatja.
+  // Futó action figyelése: minden futás, ami nem az appból indított build-panelhez tartozik (automatikus,
+  // push által indított, másik helyről indított), „Action folyamatban” fület kap élő lépésekkel, és a fázisai
+  // a naplóba is bekerülnek. Menet közben induló futásokat is felvesz.
   useEffect(() => {
-    setActive([]); setLogTab("log"); activeRef.current = [];
+    setActive([]); setLogTab("log"); activeRef.current = []; actPhases.current = {};
     if (!repo) return;
     let alive = true;
     let first = true;
     const tracked = new Set<number>();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async () => {
-      if (!alive) return;
+    let inflight: Promise<void> | null = null;
+    const body = async () => {
       let delay = 30000;
       if (document.visibilityState === "visible") {
         try {
           const now = await gh.activeRuns(repo);
           if (!alive) return;
-          if (first) {
-            first = false;
-            now.filter((x) => !panelIds.current.has(x.id)).forEach((x) => tracked.add(x.id));
-            if (tracked.size) add(`Futó action: ${now.filter((x) => tracked.has(x.id)).map((x) => x.name).join(", ")} · nyisd meg az „Action” fület`);
-          }
+          const fresh = now.filter((x) => !tracked.has(x.id) && !panelIds.current.has(x.id));
+          fresh.forEach((x) => tracked.add(x.id));
+          if (fresh.length) add(`${first ? "Futó action" : "Új action indult"}: ${fresh.map((x) => x.name).join(", ")}`);
+          first = false;
           const mine = now.filter((x) => tracked.has(x.id));
           const prev = activeRef.current;
-          if (prev.length && !mine.length) {
-            const done = await gh.getRuns(repo, prev.map((x) => x.id)).catch(() => []);
+          const gone = prev.filter((p) => !mine.some((m) => m.id === p.id));
+          if (gone.length) {
+            const done = await gh.getRuns(repo, gone.map((x) => x.id)).catch(() => []);
             if (!alive) return;
+            logPhases(done, actPhases.current);
             add(`ACTION KÉSZ: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
-            tracked.clear();
-            setLogTab("log");
+            gone.forEach((x) => tracked.delete(x.id));
+            if (!mine.length) setLogTab("log");
             setRelTick((n) => n + 1);
           }
+          logPhases(mine, actPhases.current);
+          if (!prev.length && mine.length) setLogTab("action");
           activeRef.current = mine;
           setActive(mine);
+          setActiveAt(new Date().toLocaleTimeString());
           if (mine.length) delay = 8000;
         } catch { /* hálózati hiba: a következő körben újra */ }
       }
       if (alive) timer = setTimeout(tick, delay);
     };
-    const wake = () => { if (document.visibilityState === "visible") { if (timer) clearTimeout(timer); tick(); } };
+    const tick = (): Promise<void> => {
+      if (!inflight) inflight = body().finally(() => { inflight = null; });
+      return inflight;
+    };
+    const wake = (): Promise<void> => {
+      if (document.visibilityState !== "visible") return Promise.resolve();
+      if (timer) clearTimeout(timer);
+      return tick();
+    };
     pokeRef.current = wake;
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("focus", wake);
@@ -220,8 +238,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   }, [since, pollTick]);
 
   // Az új build fázisait folyamatosan a naplóba írja (csak a változásokat).
-  function logPhases(rs: Run[]) {
-    const ph = phases.current;
+  function logPhases(rs: Run[], ph: Record<string, string> = phases.current) {
     const note = (k: string, v: string, line: string) => { if (ph[k] !== v) { ph[k] = v; add(line); } };
     rs.forEach((x) => {
       const st = x.conclusion ?? x.status;
@@ -236,11 +253,18 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     });
   }
 
-  // Kézi frissítés: release, futó action és (ha követünk buildet) a build állapota is.
-  function refresh() {
+  // Kézi frissítés: release, futó action és (ha követünk buildet) a build állapota is. Látható visszajelzéssel.
+  async function refresh() {
+    if (refreshing) return;
+    setRefreshing(true);
     setRelTick((n) => n + 1);
     setPollTick((n) => n + 1);
-    pokeRef.current?.();
+    try {
+      await Promise.all([pokeRef.current?.(), new Promise((r) => setTimeout(r, 700))]);
+    } finally {
+      setRefreshedAt(new Date().toLocaleTimeString());
+      setRefreshing(false);
+    }
   }
 
   async function build() {
@@ -412,6 +436,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </>
         ) : (
           <>
+            <div className="flex shrink-0 gap-1 font-mono text-xs">
+              <button type="button" onClick={() => patchFile.current?.click()} className="flex-1 rounded-md border border-border px-2 py-1.5">Fájl kiválasztása</button>
+              <button type="button" disabled={!patch} onClick={() => setPatch("")} className="rounded-md border border-border px-3 py-1.5 disabled:opacity-40">Törlés</button>
+              <input ref={patchFile} type="file" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setPatch(await f.text()); }} />
+            </div>
             <textarea
               value={patch}
               onChange={(e) => setPatch(e.target.value)}
@@ -458,11 +487,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           <div className="flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
             <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
             {active.length > 0 && (
-              <button onClick={() => setLogTab("action")} className={`flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
+              <button onClick={() => setLogTab("action")} className={`min-w-0 flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
                 <span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})
               </button>
             )}
-            <button onClick={refresh} title="Állapot frissítése" className="ml-auto rounded border border-border px-2 py-1">↻ Frissítés</button>
+            <button onClick={refresh} disabled={refreshing} title={refreshedAt ? `Állapot frissítése · utoljára: ${refreshedAt}` : "Állapot frissítése"} className="ml-auto flex shrink-0 items-center gap-1 rounded border border-border px-2 py-1 disabled:opacity-70">
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-primary" : ""}`} />
+              {refreshing ? "Frissítés…" : refreshedAt || "Frissítés"}
+            </button>
           </div>
         )}
         {stage === 3 && (
@@ -505,7 +537,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         )}
         {logTab === "action" && active.length > 0 ? (
           <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
-            {actionText(active)}
+            {`Frissítve: ${activeAt} · 8 mp-enként magától is\n\n`}{actionText(active)}
           </pre>
         ) : (
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
@@ -533,13 +565,13 @@ function stepIcon(s: string, c: string | null) {
 function actionText(runs: Run[]): string {
   return runs.map((r) => {
     const head = `${stepIcon(r.status, r.conclusion)} ${r.name} (${r.event}) · ${r.conclusion ?? r.status}`;
-    const jobs = r.jobs.map((j) => {
+    const jobs = r.jobs.length ? r.jobs.map((j) => {
       const done = j.steps.filter((x) => x.status === "completed").length;
       const cur = j.steps.find((x) => x.status === "in_progress");
       const where = j.status !== "completed" ? `\n    Most itt tart: ${cur ? cur.name : "várakozás a futtatóra"} (${done}/${j.steps.length})` : "";
       const steps = j.steps.map((x) => `      ${stepIcon(x.status, x.conclusion)} ${x.name}`).join("\n");
       return `  ${stepIcon(j.status, j.conclusion)} ${j.name}${where}\n${steps}`;
-    }).join("\n");
+    }).join("\n") : "  (még nincs job: a GitHub most állítja össze, vagy sorban áll a futtatóra)";
     return `${head}\n${jobs}\n  ${r.url}`;
   }).join("\n\n");
 }

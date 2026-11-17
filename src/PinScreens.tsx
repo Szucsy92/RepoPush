@@ -129,7 +129,9 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
     if (busy || wait > 0) return;
     setErr("");
     const r = await unlockWithBiometric();
-    if ("pin" in r) await finish(r.pin); else setErr(`A biometrikus azonosítás nem sikerült: ${r.reason}. Próbáld újra, vagy add meg a PIN-t.`);
+    if ("pin" in r) await finish(r.pin);
+    else if (r.negative) choose("pin"); // the "PIN használata" button of the system prompt
+    else if (!r.cancelled) setErr(`A biometrikus azonosítás nem sikerült: ${r.reason}. Próbáld újra, vagy add meg a PIN-t.`);
   }
   useEffect(() => { if (mode === "bio" && asked.current !== "bio") { asked.current = "bio"; viaBio(); } }, [mode]);
 

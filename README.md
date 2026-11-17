@@ -1,26 +1,40 @@
-# GitHub Zip Uploader
+# RepoPush
 
-Kell egy olyan app, amely belsőtárhelyről képes github-ra akár zip-et feltölteni és teljesen helyesen lecseréli, vagy beilleszti a repo fájlokat, valamint patch és diff kezelésével is megbírkózik. összekapcsolható, saját github fiókkal és kezelhetőek a saját repo-k.
-Egyetlen zip fájl behúzása, tallózása elég. Nem jelent gondot a /.github/workflow/*.yml beillesztése vagy /.gitignore beillesztése. A zip az általános letöltött repo struktúra.
-Automatikusan felülír és végrehajt. Nincs szükség védelemre. Csak akkor használom, ha tudom mit csinálok.
+ZIP-ből vagy patch/diff fájlból közvetlenül frissítheted a saját GitHub repóidat, a saját GitHub tokeneddel. Nincs szerver és nincs közös kulcs: minden a böngésződben fut, és a token csak az `api.github.com`-nak megy.
 
-This project was built with [Lovable](https://lovable.dev).
+## Mit tud
+- ZIP behúzása vagy tallózása. A közös gyökérmappát (pl. `repo-main/`) levágja, a `.github/workflows/*.yml` és a `.gitignore` is felkerül.
+- **Teljes csere** (ami nincs a ZIP-ben, törlődik) vagy **Beillesztés** (a többi fájl marad).
+- Patch / diff alkalmazása (új, módosított, törölt, átnevezett fájlok).
+- Minden egyetlen commitban megy fel. Előtte megerősítő ablak mutatja, hány fájl lesz új, módosított és törölt, melyik repóban és ágon.
+- Üres repó esetén magától létrehozza az első commitot.
+- Feltöltés után a buildek (GitHub Actions) indítása, követése és a naplók letöltése. Ha a böngésző nem engedi a napló letöltését, a lépések állapotát és a GitHub linket mutatja.
 
-## Build with Lovable
+## Token készítése
+1. GitHub → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+2. Válaszd ki a repókat, és adj meg lejáratot.
+3. Repository permissions:
+   - **Contents**: Read and write
+   - **Actions**: Read and write
+   - **Workflows**: Read and write
+   - **Metadata**: Read
+4. Klasszikus token esetén: `repo` + `workflow` jog.
+5. Az appban illeszd be, nyomd meg a „Token ellenőrzése” gombot, majd a „Mentés és tovább” gombot.
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/bfae6e07-30dc-4f22-abfb-b82f0b353f43).
+A „Token megjegyzése ezen az eszközön” kapcsolóval a token az eszközön marad. Kikapcsolva a böngészőfül bezárásakor törlődik. A „Kijelentkezés” gomb törli.
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+## Telepítés appként (PWA)
+- **Android / Chrome:** nyisd meg az oldalt, majd menü → **Alkalmazás telepítése** / **Hozzáadás a kezdőképernyőhöz**.
+- **iPhone / Safari:** Megosztás → **Főképernyőhöz adás**.
+- **Asztali Chrome / Edge:** a címsor jobb oldalán a telepítés ikon.
 
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
+## Fejlesztés
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+npm install
+npm run dev      # http://localhost:8080
+npm test
+npm run build    # dist/
 ```
+
+## GitHub Pages
+A `.github/workflows/deploy.yml` minden `main` push után lefuttatja a teszteket, megépíti az appot, és kiteszi GitHub Pagesre. A repóban: **Settings → Pages → Source: GitHub Actions**. A relatív elérési út miatt bármilyen `/<repo>/` alatt fut.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Delete, Fingerprint } from "lucide-react";
-import { PIN_LEN, MAX_FAILS, biometricAvailable, biometricEnabled, enableBiometric, lockWaitMs, sealToken, tryUnlock, unlockWithBiometric } from "@/lib/lock";
+import { PIN_LEN, MAX_FAILS, biometricAvailable, biometricEnabled, enableBiometric, getUnlockMode, lockWaitMs, sealToken, setUnlockMode, tryUnlock, unlockWithBiometric, type UnlockMode } from "@/lib/lock";
 import { dropPlainToken } from "@/lib/token";
 
 function Shell({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
@@ -16,7 +16,7 @@ function Shell({ title, hint, children }: { title: string; hint?: string; childr
   );
 }
 
-function PinPad({ value, onChange, disabled, onBio }: { value: string; onChange: (v: string) => void; disabled?: boolean; onBio?: () => void }) {
+function PinPad({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const press = (d: string) => { if (!disabled && value.length < PIN_LEN) onChange(value + d); };
   const back = () => { if (!disabled) onChange(value.slice(0, -1)); };
   useEffect(() => {
@@ -32,7 +32,7 @@ function PinPad({ value, onChange, disabled, onBio }: { value: string; onChange:
       </div>
       <div className="mx-auto grid max-w-[260px] grid-cols-3 gap-2 font-mono text-xl">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => <button key={d} type="button" disabled={disabled} onClick={() => press(d)} className={key}>{d}</button>)}
-        {onBio ? <button type="button" disabled={disabled} onClick={onBio} aria-label="Biometrikus azonosítás" className={key}><Fingerprint className="mx-auto h-6 w-6" /></button> : <span />}
+        <span />
         <button type="button" disabled={disabled} onClick={() => press("0")} className={key}>0</button>
         <button type="button" disabled={disabled} onClick={back} aria-label="Törlés" className={key}><Delete className="mx-auto h-6 w-6" /></button>
       </div>
@@ -83,15 +83,19 @@ export function PinSetup({ token, onDone, onBack }: { token: string; onDone: (to
   );
 }
 
-/** Shown on app start when a token is stored: PIN pad, with biometrics first if it was switched on. */
+/** Shown on app start when a token is stored. Opens in the remembered mode (fingerprint or PIN); the button at the bottom switches. */
 export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) => void; onForgot: () => void }) {
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(() => lockWaitMs());
-  const useBio = biometricEnabled();
-  const asked = useRef(false);
+  const [mode, setMode] = useState<UnlockMode>(() => getUnlockMode());
+  const [bioOn] = useState(() => biometricEnabled());
+  const [bioAvail, setBioAvail] = useState(false);
+  const [enroll, setEnroll] = useState(false); // switch biometrics on with the next correct PIN
+  const asked = useRef("");
 
+  useEffect(() => { if (!bioOn) biometricAvailable().then(setBioAvail); }, []);
   useEffect(() => {
     if (wait <= 0) return;
     const id = setInterval(() => setWait(lockWaitMs()), 500);
@@ -101,6 +105,7 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
   async function finish(p: string) {
     setBusy(true);
     const r = await tryUnlock(p);
+    if (r.ok && enroll) await enableBiometric(p); // the PIN is known now: store it behind the fingerprint
     setBusy(false);
     if (r.ok) return onUnlock(r.token);
     setPin("");
@@ -112,16 +117,40 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
 
   async function viaBio() {
     if (busy || wait > 0) return;
+    setErr("");
     const p = await unlockWithBiometric();
-    if (p) await finish(p);
+    if (p) await finish(p); else setErr("A biometrikus azonosítás nem sikerült. Próbáld újra, vagy add meg a PIN-t.");
   }
-  useEffect(() => { if (useBio && !asked.current) { asked.current = true; viaBio(); } }, []);
+  useEffect(() => { if (mode === "bio" && asked.current !== "bio") { asked.current = "bio"; viaBio(); } }, [mode]);
 
+  function choose(m: UnlockMode) {
+    setUnlockMode(m); // remembered for the next start
+    asked.current = "";
+    setErr(""); setPin(""); setEnroll(false);
+    setMode(m);
+  }
+
+  const sw = "w-full rounded-md border border-border px-3 py-2.5 font-mono text-sm";
   return (
-    <Shell title="PIN megadása">
-      <PinPad value={pin} onChange={setPin} disabled={busy || wait > 0} onBio={useBio ? viaBio : undefined} />
+    <Shell title={mode === "bio" ? "Biometrikus feloldás" : "PIN megadása"} hint={mode === "pin" && enroll ? "Add meg a PIN-t, utána bekapcsoljuk a biometrikus azonosítást." : undefined}>
+      {mode === "bio" ? (
+        <div className="space-y-3">
+          <button onClick={viaBio} disabled={busy || wait > 0} aria-label="Biometrikus azonosítás" className="mx-auto flex h-24 w-24 items-center justify-center rounded-full border border-border bg-card active:bg-secondary disabled:opacity-40">
+            <Fingerprint className="h-12 w-12 text-primary" />
+          </button>
+          <div className="text-center text-xs text-muted-foreground">Érintsd meg az érzékelőt, vagy koppints az ikonra.</div>
+        </div>
+      ) : (
+        <PinPad value={pin} onChange={setPin} disabled={busy || wait > 0} />
+      )}
       <div className="min-h-4 text-center font-mono text-xs text-destructive">{wait > 0 ? `Túl sok próbálkozás. Várj ${Math.ceil(wait / 1000)} mp-et.` : err}</div>
-      <button onClick={() => { if (window.confirm("Kijelentkezel, és a token törlődik erről az eszközről. Utána új tokent és új PIN-t kell megadnod.")) onForgot(); }} className="mx-auto block text-xs text-muted-foreground underline">Elfelejtett PIN · kijelentkezés</button>
+      <div className="space-y-2">
+        {mode === "bio" ? <button onClick={() => choose("pin")} className={sw}>PIN megadása</button>
+          : bioOn ? <button onClick={() => choose("bio")} className={sw}>Biometrikus azonosítás</button>
+          : bioAvail ? <button onClick={() => setEnroll((e) => !e)} className={`${sw} ${enroll ? "border-primary text-primary" : ""}`}>{enroll ? "✓ Biometrikus azonosítás bekapcsolása a következő PIN-nel" : "Biometrikus azonosítás bekapcsolása"}</button>
+          : null}
+        <button onClick={() => { if (window.confirm("Kijelentkezel, és a token törlődik erről az eszközről. Utána új tokent és új PIN-t kell megadnod.")) onForgot(); }} className="mx-auto block pt-1 text-xs text-muted-foreground underline">Elfelejtett PIN · kijelentkezés</button>
+      </div>
     </Shell>
   );
 }

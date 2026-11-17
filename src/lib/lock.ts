@@ -9,6 +9,7 @@ const FREE_TRIES = 5; // after this many wrong PINs every further one adds a gro
 const VAULT = "repopush.vault";
 const FAILS = "repopush.pin_fails";
 const BIO = "repopush.bio";
+const MODE = "repopush.unlock_mode"; // remembered choice on the lock screen: "bio" | "pin"
 const BIO_SERVER = "io.github.szucsy92.repopush";
 const ITER = 600_000;
 
@@ -69,6 +70,14 @@ const bio = async () => (await import("capacitor-native-biometric")).NativeBiome
 
 export const biometricEnabled = (): boolean => isNative() && localStorage.getItem(BIO) === "1";
 
+export type UnlockMode = "bio" | "pin";
+/** The remembered way to unlock (biometrics first once they are switched on, until the user picks the PIN). */
+export function getUnlockMode(): UnlockMode {
+  if (!biometricEnabled()) return "pin";
+  return localStorage.getItem(MODE) === "pin" ? "pin" : "bio";
+}
+export const setUnlockMode = (m: UnlockMode) => localStorage.setItem(MODE, m);
+
 export async function biometricAvailable(): Promise<boolean> {
   if (!isNative()) return false;
   try { return (await (await bio()).isAvailable()).isAvailable; } catch { return false; }
@@ -80,6 +89,7 @@ export async function enableBiometric(pin: string): Promise<boolean> {
     await b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" });
     await b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER });
     localStorage.setItem(BIO, "1");
+    setUnlockMode("bio");
     return true;
   } catch { return false; }
 }
@@ -96,6 +106,6 @@ export async function unlockWithBiometric(): Promise<string | null> {
 /** Removes the vault, the wrong-PIN counter and the biometric secret. */
 export function clearLock() {
   const hadBio = localStorage.getItem(BIO) === "1";
-  [VAULT, FAILS, BIO].forEach((k) => localStorage.removeItem(k));
+  [VAULT, FAILS, BIO, MODE].forEach((k) => localStorage.removeItem(k));
   if (hadBio && isNative()) bio().then((b) => b.deleteCredentials({ server: BIO_SERVER })).catch(() => {});
 }

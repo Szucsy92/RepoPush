@@ -432,8 +432,20 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             ))}
           </div>
         )}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
+        {repo && (
+          <div className="flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
+            <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
+            {active.length > 0 && (
+              <button onClick={() => setLogTab("action")} className={`flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
+                <span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})
+              </button>
+            )}
+            <button onClick={refresh} title="Állapot frissítése" className="ml-auto rounded border border-border px-2 py-1">↻ Frissítés</button>
+          </div>
+        )}
         {stage === 3 && (
-          <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">
+          <div className="max-h-[40vh] shrink-0 space-y-1 overflow-auto border-b border-border p-1.5 font-mono text-[11px]">
             <div className="flex gap-1">
               <button disabled={building} onClick={build} className="flex-1 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
                 {building ? "Build fut…" : runs.length ? "Új build" : "▶ Friss build indítása"}
@@ -461,26 +473,16 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             {building && !runs.length && <div className="animate-pulse text-muted-foreground">Várakozás a GitHubra…</div>}
           </div>
         )}
-        {repo && (
-          <div className="flex shrink-0 gap-1 font-mono text-[11px]">
-            <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
-            {active.length > 0 && (
-              <button onClick={() => setLogTab("action")} className={`flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
-                <span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})
-              </button>
-            )}
-            <button onClick={refresh} title="Állapot frissítése" className="ml-auto rounded border border-border px-2 py-1">↻ Frissítés</button>
-          </div>
-        )}
         {logTab === "action" && active.length > 0 ? (
-          <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
+          <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
             {actionText(active)}
           </pre>
         ) : (
-        <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
+        <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
           {log.length ? log.join("\n") : "Napló…"}
         </pre>
         )}
+        </div>
       </div>
     </main>
     </>

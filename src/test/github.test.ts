@@ -33,6 +33,13 @@ describe("GitHub client", () => {
   });
 });
 
+describe("repo tree", () => {
+  it("reports blobs and the truncated flag", async () => {
+    const f = async () => ok({ tree: [{ path: "a.txt", type: "blob", sha: "1" }, { path: "d", type: "tree", sha: "2" }], truncated: true });
+    expect(await new GitHub("t", f as any).getTree("o/r", "main")).toEqual({ files: { "a.txt": "1" }, truncated: true });
+  });
+});
+
 describe("change plan", () => {
   it("counts added, modified, unchanged and (replace only) deleted files", async () => {
     const same = btoa("hello\n");

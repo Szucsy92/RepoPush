@@ -12,7 +12,7 @@ export type Repo = { full_name: string; default_branch: string; private: boolean
 export type FileOp = { path: string; base64?: string; sha?: string; delete?: boolean };
 export type Step = { name: string; status: string; conclusion: string | null };
 export type Job = { name: string; status: string; conclusion: string | null; url: string; steps: Step[] };
-export type Run = { id: number; name: string; event: string; status: string; conclusion: string | null; url: string; jobs: Job[] };
+export type Run = { id: number; suite: number; name: string; event: string; status: string; conclusion: string | null; url: string; jobs: Job[] };
 
 export function friendlyError(status: number, body: string, h: Headers): string {
   let msg = "";
@@ -82,13 +82,13 @@ export class GitHub {
     } catch { return []; }
   }
 
-  /** Path → blob sha of the current branch tree (empty when branch/repo is empty). */
-  async getTree(repo: string, branch: string): Promise<Record<string, string>> {
+  /** Path → blob sha of the current branch tree (empty when branch/repo is empty). `truncated` = GitHub cut the listing (huge repo). */
+  async getTree(repo: string, branch: string): Promise<{ files: Record<string, string>; truncated: boolean }> {
     try {
-      const t = await this.req<{ tree: { path: string; type: string; sha: string }[] }>(`repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
-      return Object.fromEntries(t.tree.filter((x) => x.type === "blob").map((x) => [x.path, x.sha]));
+      const t = await this.req<{ tree: { path: string; type: string; sha: string }[]; truncated?: boolean }>(`repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+      return { files: Object.fromEntries(t.tree.filter((x) => x.type === "blob").map((x) => [x.path, x.sha])), truncated: !!t.truncated };
     } catch (e) {
-      if (e instanceof GitHubError && (e.status === 404 || e.status === 409)) return {};
+      if (e instanceof GitHubError && (e.status === 404 || e.status === 409)) return { files: {}, truncated: false };
       throw e;
     }
   }
@@ -179,23 +179,13 @@ export class GitHub {
     return Promise.all(r.workflow_runs.map(async (run) => {
       const j = await this.req<{ jobs: any[] }>(`repos/${repo}/actions/runs/${run.id}/jobs`);
       return {
-        id: run.id, name: run.name, event: run.event, status: run.status, conclusion: run.conclusion, url: run.html_url,
+        id: run.id, suite: run.check_suite_id, name: run.name, event: run.event, status: run.status, conclusion: run.conclusion, url: run.html_url,
         jobs: j.jobs.map((x) => ({
           name: x.name, status: x.status, conclusion: x.conclusion, url: x.html_url,
           steps: (x.steps ?? []).map((s: any) => ({ name: s.name, status: s.status, conclusion: s.conclusion })),
         })),
       };
     }));
-  }
-
-  /** Run log ZIP. GitHub redirects to blob storage, which may fail CORS/CSP in browsers: caller must fall back. */
-  async runLogs(repo: string, id: number): Promise<Blob> {
-    let res: Response;
-    try { res = await this.raw(`repos/${repo}/actions/runs/${id}/logs`); } catch (e) {
-      if (e instanceof GitHubError) throw e;
-      throw new Error("A böngésző nem engedi a napló közvetlen letöltését (átirányítás). Nyisd meg a buildet a GitHubon.");
-    }
-    return res.blob();
   }
 }
 

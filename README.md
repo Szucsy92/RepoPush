@@ -8,7 +8,8 @@ ZIP-ből vagy patch/diff fájlból közvetlenül frissítheted a saját GitHub r
 - Patch / diff alkalmazása (új, módosított, törölt, átnevezett fájlok).
 - Minden egyetlen commitban megy fel. Előtte megerősítő ablak mutatja, hány fájl lesz új, módosított és törölt, melyik repóban és ágon.
 - Üres repó esetén magától létrehozza az első commitot.
-- Feltöltés után a buildek (GitHub Actions) indítása, követése és a naplók letöltése. Ha a böngésző nem engedi a napló letöltését, a lépések állapotát és a GitHub linket mutatja.
+- Ami nem változott, azt nem tölti fel újra; ha semmi sem változott, nem készít üres commitot.
+- Feltöltés után a buildek (GitHub Actions) indítása és követése. A teljes napló a böngészőből nem tölthető le (a GitHub átirányít egy másik tárhelyre, amit az app biztonsági szabálya szándékosan tilt), ezért a „⇩ log ZIP” gomb a GitHub saját letöltő linkjét nyitja meg (a böngésződ GitHub-bejelentkezésével, a ZIP a Letöltésekbe kerül), a „részletek” gomb pedig a hibás jobokat és lépéseket listázza, a hibás jobhoz naplólinkkel.
 
 ## Token készítése
 1. GitHub → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.

@@ -34,7 +34,6 @@ export default defineConfig({
       manifest: false,
       workbox: {
         globPatterns: ["**/*.{js,css,html,png,ico,webmanifest}"],
-        navigateFallbackDenylist: [/^\/~oauth/],
         runtimeCaching: [
           { urlPattern: ({ request }) => request.mode === "navigate", handler: "NetworkFirst" },
         ],

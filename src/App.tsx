@@ -103,22 +103,18 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     } catch (e: any) { add(`Build hiba: ${e.message}`); setBuilding(false); }
   }
 
-  async function download(x: Run) {
-    try {
-      add(`Napló letöltése: ${x.name}…`);
-      const blob = await gh.runLogs(repo, x.id);
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${repo.split("/")[1]}-${x.name.replace(/\W+/g, "_")}-${x.id}-logs.zip`;
-      a.click();
-    } catch (e: any) {
-      add(`Napló hiba: ${e.message}`);
-      x.jobs.forEach((j) => {
-        add(`  ${j.name}: ${j.conclusion ?? j.status}`);
-        j.steps.forEach((s) => add(`    - ${s.name}: ${s.conclusion ?? s.status}`));
-      });
-      add(`  Teljes napló a GitHubon: ${x.url}`);
-    }
+  // The full log ZIP is a plain github.com link: the browser's own GitHub session does the download
+  // (the API route redirects to blob storage, which the app's CSP blocks on purpose).
+  const logZip = (x: Run) => `https://github.com/${repo}/suites/${x.suite}/logs`;
+
+  function details(x: Run) {
+    add(`${x.name}: ${x.conclusion ?? x.status}`);
+    x.jobs.forEach((j) => {
+      add(`  ${j.name}: ${j.conclusion ?? j.status} · ${j.url}`);
+      j.steps.filter((s) => s.conclusion && s.conclusion !== "success" && s.conclusion !== "skipped").forEach((s) => add(`    ✖ ${s.name}: ${s.conclusion}`));
+    });
+    add(`  Teljes napló (ZIP): ${logZip(x)}`);
+    add(`  Futás oldala: ${x.url}`);
   }
 
   function saveLog() {
@@ -138,17 +134,27 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         if (!zipFiles.length) throw new Error("Nincs ZIP betöltve.");
         add(`Feltöltés: ${zipFiles.length} fájl → ${repo}@${branch} (${mode === "replace" ? "teljes csere" : "beillesztés"})`);
         setStep("Összevetés a repó jelenlegi állapotával");
-        const plan = await planZip(zipFiles, await gh.getTree(repo, branch), mode);
+        const { files: remote, truncated } = await gh.getTree(repo, branch);
+        if (truncated && mode === "replace") throw new Error("A repó túl nagy a teljes összevetéshez (a GitHub csonkolta a fájllistát), ezért teljes cserét nem végzek. Használd a Beillesztés módot.");
+        const plan = await planZip(zipFiles, remote, mode);
+        if (!plan.added.length && !plan.modified.length && !plan.deleted.length) {
+          add("Nincs változás: a ZIP megegyezik a repó jelenlegi állapotával, nem készült commit.");
+          setStage(3); setPct(100); setStep("Nincs változás");
+          return;
+        }
         if (!(await ask(plan))) throw new Error("Megszakítva.");
         setStage(2);
-        const done: { path: string; sha: string }[] = [];
+        // Unchanged files keep their existing blob: no need to upload them again.
+        const dirty = new Set([...plan.added, ...plan.modified]);
+        const toSend = zipFiles.filter((f) => dirty.has(f.path));
+        const done: { path: string; sha: string }[] = zipFiles.filter((f) => !dirty.has(f.path) && remote[f.path]).map((f) => ({ path: f.path, sha: remote[f.path]! }));
         const B = 20;
-        for (let k = 0; k < zipFiles.length; k += B) {
-          const batch = zipFiles.slice(k, k + B);
-          setStep(`Fájlok küldése ${k + batch.length}/${zipFiles.length}`);
+        for (let k = 0; k < toSend.length; k += B) {
+          const batch = toSend.slice(k, k + B);
+          setStep(`Fájlok küldése ${k + batch.length}/${toSend.length}`);
           done.push(...(await gh.uploadBlobs(repo, batch)));
           batch.forEach((f) => add(`  ↑ ${f.path}`));
-          setPct(Math.round(((k + batch.length) / zipFiles.length) * 90));
+          setPct(Math.round(((k + batch.length) / toSend.length) * 90));
         }
         setStep("Commit létrehozása és ág frissítése");
         add("Commit létrehozása…");
@@ -285,11 +291,12 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                   <span className={dot(x.status, x.conclusion)}>●</span>
                   <a href={x.url} target="_blank" rel="noreferrer" className="flex-1 truncate underline">{x.name} <span className="text-muted-foreground">({x.event})</span></a>
                   <span className="text-muted-foreground">{x.conclusion ?? x.status}</span>
-                  {x.status === "completed" && <button onClick={() => download(x)} className="rounded border border-border px-1.5">⇩ log</button>}
+                  {x.status === "completed" && <a href={logZip(x)} target="_blank" rel="noreferrer" className={`rounded border px-1.5 ${x.conclusion === "failure" ? "border-destructive text-destructive" : "border-border"}`}>⇩ log ZIP</a>}
+                  {x.status === "completed" && <button onClick={() => details(x)} className="rounded border border-border px-1.5">részletek</button>}
                 </div>
                 {x.jobs.map((j) => (
                   <div key={j.name} className="pl-3 text-muted-foreground">
-                    <span className={dot(j.status, j.conclusion)}>●</span> {j.name}
+                    <span className={dot(j.status, j.conclusion)}>●</span> {j.status === "completed" && j.conclusion === "failure" ? <a href={j.url} target="_blank" rel="noreferrer" className="underline">{j.name} (napló)</a> : j.name}
                     {j.status !== "completed" && j.steps.find((s: { status: string }) => s.status === "in_progress") && <> · {j.steps.find((s: { status: string }) => s.status === "in_progress")!.name}</>}
                     {j.steps.length > 0 && <> · {j.steps.filter((s: { status: string }) => s.status === "completed").length}/{j.steps.length}</>}
                   </div>

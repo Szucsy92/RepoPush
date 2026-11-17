@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Download } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Download } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
@@ -59,6 +59,27 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const pokeRef = useRef<(() => void) | null>(null);
   const [drag, setDrag] = useState(false);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
+
+  // Build status strip: one line with the current step; tapping it drops down the full run list.
+  // Any tap outside the strip/dropdown folds it back.
+  const [ddOpen, setDdOpen] = useState(false);
+  const [ddMax, setDdMax] = useState(240);
+  const ddRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!ddOpen) return;
+    // The list may grow down to the bottom of the log window and scrolls inside when there is more.
+    const measure = () => {
+      const c = cardRef.current, st = stripRef.current;
+      if (c && st) setDdMax(Math.max(120, Math.floor(c.getBoundingClientRect().bottom - st.getBoundingClientRect().bottom - 6)));
+    };
+    measure();
+    const out = (e: PointerEvent) => { if (!ddRef.current?.contains(e.target as Node)) setDdOpen(false); };
+    document.addEventListener("pointerdown", out);
+    window.addEventListener("resize", measure);
+    return () => { document.removeEventListener("pointerdown", out); window.removeEventListener("resize", measure); };
+  }, [ddOpen]);
 
   useEffect(() => {
     gh.getMe().then(setMe).catch((e) => add(String(e.message ?? e)));
@@ -330,6 +351,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     }
   }
 
+  const sum = buildSummary(runs, building);
+
   return (
     <>
     {confirm && <ConfirmDialog plan={confirm.plan} repo={repo} branch={branch} mode={tab === "patch" ? "patch" : mode === "replace" ? "teljes csere" : "beillesztés"}
@@ -439,7 +462,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             ))}
           </div>
         )}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
+        <div ref={cardRef} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
         {repo && (
           <div className="flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
             <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
@@ -452,32 +475,41 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </div>
         )}
         {stage === 3 && (
-          <div className="max-h-[40vh] shrink-0 space-y-1 overflow-auto border-b border-border p-1.5 font-mono text-[11px]">
-            <div className="flex gap-1">
-              <button disabled={building} onClick={build} className="flex-1 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
-                {building ? "Build fut…" : runs.length ? "Új build" : "▶ Friss build indítása"}
+          <div ref={stripRef} className="relative flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
+            <div ref={ddRef} className="min-w-0 flex-1">
+              <button onClick={() => setDdOpen((o) => !o)} aria-expanded={ddOpen} className="flex w-full items-center gap-1 rounded border border-border px-2 py-1.5 text-left">
+                <span className={sum.dot}>●</span>
+                <span className="min-w-0 flex-1 truncate">{sum.text}</span>
+                <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${ddOpen ? "rotate-180" : ""}`} />
               </button>
-              <button onClick={saveLog} className="rounded border border-border px-2 py-1.5">{isNative() ? "⧉ Napló" : "⇩ Napló"}</button>
-            </div>
-            {runs.map((x) => (
-              <div key={x.id} className="space-y-0.5">
-                <div className="flex items-center gap-1">
-                  <span className={dot(x.status, x.conclusion)}>●</span>
-                  <a href={x.url} target="_blank" rel="noreferrer" className="flex-1 truncate underline">{x.name} <span className="text-muted-foreground">({x.event})</span></a>
-                  <span className="text-muted-foreground">{x.conclusion ?? x.status}</span>
-                  {x.status === "completed" && <a href={logZip(x)} target="_blank" rel="noreferrer" className={`rounded border px-1.5 ${x.conclusion === "failure" ? "border-destructive text-destructive" : "border-border"}`}>⇩ log ZIP</a>}
-                  {x.status === "completed" && <button onClick={() => details(x)} className="rounded border border-border px-1.5">részletek</button>}
+              {ddOpen && (
+                <div style={{ maxHeight: ddMax }} className="absolute left-1 right-1 top-full z-10 mt-0.5 space-y-1 overflow-auto rounded border border-border bg-background p-1.5 shadow-lg">
+                  {runs.map((x) => (
+                    <div key={x.id} className="space-y-0.5">
+                      <div className="flex items-center gap-1">
+                        <span className={dot(x.status, x.conclusion)}>●</span>
+                        <a href={x.url} target="_blank" rel="noreferrer" className="flex-1 truncate underline">{x.name} <span className="text-muted-foreground">({x.event})</span></a>
+                        <span className="text-muted-foreground">{x.conclusion ?? x.status}</span>
+                        {x.status === "completed" && <a href={logZip(x)} target="_blank" rel="noreferrer" className={`rounded border px-1.5 ${x.conclusion === "failure" ? "border-destructive text-destructive" : "border-border"}`}>⇩ log ZIP</a>}
+                        {x.status === "completed" && <button onClick={() => { details(x); setDdOpen(false); }} className="rounded border border-border px-1.5">részletek</button>}
+                      </div>
+                      {x.jobs.map((j) => (
+                        <div key={j.name} className="pl-3 text-muted-foreground">
+                          <span className={dot(j.status, j.conclusion)}>●</span> {j.status === "completed" && j.conclusion === "failure" ? <a href={j.url} target="_blank" rel="noreferrer" className="underline">{j.name} (napló)</a> : j.name}
+                          {j.status !== "completed" && j.steps.find((s: { status: string }) => s.status === "in_progress") && <> · {j.steps.find((s: { status: string }) => s.status === "in_progress")!.name}</>}
+                          {j.steps.length > 0 && <> · {j.steps.filter((s: { status: string }) => s.status === "completed").length}/{j.steps.length}</>}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  {!runs.length && <div className={`text-muted-foreground ${building ? "animate-pulse" : ""}`}>{building ? "Várakozás a GitHubra…" : "Még nincs követett build."}</div>}
                 </div>
-                {x.jobs.map((j) => (
-                  <div key={j.name} className="pl-3 text-muted-foreground">
-                    <span className={dot(j.status, j.conclusion)}>●</span> {j.status === "completed" && j.conclusion === "failure" ? <a href={j.url} target="_blank" rel="noreferrer" className="underline">{j.name} (napló)</a> : j.name}
-                    {j.status !== "completed" && j.steps.find((s: { status: string }) => s.status === "in_progress") && <> · {j.steps.find((s: { status: string }) => s.status === "in_progress")!.name}</>}
-                    {j.steps.length > 0 && <> · {j.steps.filter((s: { status: string }) => s.status === "completed").length}/{j.steps.length}</>}
-                  </div>
-                ))}
-              </div>
-            ))}
-            {building && !runs.length && <div className="animate-pulse text-muted-foreground">Várakozás a GitHubra…</div>}
+              )}
+            </div>
+            <button disabled={building} onClick={build} title="Friss build indítása" className="shrink-0 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
+              {building ? "Fut…" : runs.length ? "Új build" : "▶ Build"}
+            </button>
+            <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} aria-label={isNative() ? "Napló másolása" : "Napló mentése"} className="shrink-0 rounded border border-border px-2 py-1.5">{isNative() ? "⧉" : "⇩"}</button>
           </div>
         )}
         {logTab === "action" && active.length > 0 ? (
@@ -519,6 +551,23 @@ function actionText(runs: Run[]): string {
     }).join("\n");
     return `${head}\n${jobs}\n  ${r.url}`;
   }).join("\n\n");
+}
+
+// The one-line state of the tracked build: what runs right now, otherwise how it ended.
+function buildSummary(runs: Run[], building: boolean): { dot: string; text: string } {
+  if (!runs.length) return building ? { dot: "text-primary animate-pulse", text: "Várakozás a GitHubra…" } : { dot: "text-muted-foreground", text: "Nincs követett build" };
+  const running = runs.filter((r) => r.status !== "completed");
+  if (running.length) {
+    const r = running[0]!;
+    const j = r.jobs.find((x) => x.status !== "completed") ?? r.jobs[0];
+    const step = j?.steps.find((x) => x.status === "in_progress");
+    const done = j ? j.steps.filter((x) => x.status === "completed").length : 0;
+    const where = [r.name, j && j.name !== r.name ? j.name : "", step?.name ?? (j ? "várakozás" : "")].filter(Boolean).join(" · ");
+    return { dot: "text-primary animate-pulse", text: `${where}${j?.steps.length ? ` (${done}/${j.steps.length})` : ""}${running.length > 1 ? ` +${running.length - 1}` : ""}` };
+  }
+  const bad = runs.filter((r) => r.conclusion && !["success", "skipped", "cancelled"].includes(r.conclusion));
+  if (bad.length) return { dot: "text-destructive", text: `✖ ${bad[0]!.name}: ${bad[0]!.conclusion}${bad.length > 1 ? ` +${bad.length - 1}` : ""}` };
+  return { dot: "text-primary", text: `✔ Kész · ${runs.length} futás` };
 }
 
 function dot(s: string, c: string | null) {

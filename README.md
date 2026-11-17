@@ -43,7 +43,8 @@ Az APK-t a GitHub Actions építi (`.github/workflows/android.yml`), a webes app
 1. **Egyszeri előkészítés:** a repóban *Settings → Secrets and variables → Actions → New repository secret*. Név: `ANDROID_KEYSTORE_PASSWORD`, érték: egy hosszú (20+ karakteres), véletlenszerű jelszó. **Mentsd el jelszókezelőbe**: a GitHub nem mutatja meg újra, és elvesztésekor a kulcs használhatatlan lesz (az új APK-t csak a régi app törlése után lehet telepíteni).
 2. *Actions → Android APK → Run workflow.* Az első futás létrehozza a kulcsot, titkosítva a `signing` ágra menti, és utána minden futás ugyanezt használja. (A kulcs egy külön ágon van, hogy a ZIP-es „Teljes csere” a `main` ágon ne törölhesse.)
 3. Kész: *Releases* → `RepoPush.apk`. Állandó link a legfrissebbhez: `https://github.com/<felhasználó>/<repó>/releases/latest/download/RepoPush.apk`.
-4. Telefonon nyisd meg a letöltött APK-t, és engedélyezd az ismeretlen forrásból telepítést. Az új verziók a régire települnek, az adatok (token) megmaradnak.
+4. Az appban a fejléc alatt megjelenik a „⬇ Legfrissebb APK letöltése" gomb, amint kész egy release (privát repónál a tokennek olvasási joga kell hozzá, a letöltéshez pedig be kell lépned a böngészőben).
+5. Telefonon nyisd meg a letöltött APK-t, és engedélyezd az ismeretlen forrásból telepítést. Az új verziók a régire települnek, az adatok (token) megmaradnak.
 
 Az appon belüli „▶ Friss build indítása” gomb az Android workflow-t is elindítja (minden `workflow_dispatch` workflow-t indít).
 

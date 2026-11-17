@@ -1,6 +1,8 @@
 // Direct, browser-side GitHub REST client. The token is passed in explicitly and is only
 // ever sent to API (https://api.github.com). Never log it or put it into a URL.
 export const API = "https://api.github.com";
+export const APP_REPO = "Szucsy92/github-zip-uploader";
+export type ApkRelease = { tag: string; url: string; published: string };
 
 export class GitHubError extends Error {
   constructor(message: string, public status: number) {
@@ -34,6 +36,17 @@ function enc(p: string) { return p.split("/").map(encodeURIComponent).join("/");
 export class GitHub {
   rate: { remaining: number; limit: number; reset: number } | null = null;
   constructor(private token: string, private fetchImpl: typeof fetch = (...a) => fetch(...a)) {}
+
+  /** A legfrissebb release RepoPush.apk-ja; null, ha még nincs kész release. */
+  async latestApk(repo: string = APP_REPO): Promise<ApkRelease | null> {
+    try {
+      const r = await this.req<{ tag_name: string; published_at: string; assets: { name: string; browser_download_url: string }[] }>(`repos/${repo}/releases/latest`);
+      const a = r.assets.find((x) => x.name === "RepoPush.apk") ?? r.assets.find((x) => x.name.endsWith(".apk"));
+      return a ? { tag: r.tag_name, url: a.browser_download_url, published: r.published_at } : null;
+    } catch {
+      return null;
+    }
+  }
 
   async req<T = any>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await this.raw(path, init);

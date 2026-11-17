@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { GitHub, planZip, type Plan, type Repo, type Run } from "@/lib/github";
+import { GitHub, planZip, type ApkRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, clearToken } from "@/lib/token";
 import { isNative } from "@/lib/native";
@@ -38,6 +38,12 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
+  const [apk, setApk] = useState<ApkRelease | null>(null);
+  useEffect(() => {
+    let alive = true;
+    gh.latestApk().then((r) => { if (alive) setApk(r); });
+    return () => { alive = false; };
+  }, [gh]);
   const [drag, setDrag] = useState(false);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
@@ -208,6 +214,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           <button onClick={() => { if (window.confirm("Kijelentkezel és törlöd a tokent erről az eszközről?")) onLogout(); }} className="ml-1 rounded border border-border px-1.5 py-0.5">Kijelentkezés</button>
         </div>
       </header>
+
+      {apk && (
+        <a href={apk.url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 border-b border-border bg-secondary px-3 py-2 font-mono text-xs text-secondary-foreground">
+          ⬇ Legfrissebb APK letöltése ({apk.tag}, {new Date(apk.published).toLocaleDateString("hu-HU")})
+        </a>
+      )}
 
       <div className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 p-3">
         <div className="flex gap-2">

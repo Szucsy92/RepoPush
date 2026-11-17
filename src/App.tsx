@@ -44,7 +44,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [pollTick, setPollTick] = useState(0);
   const [seenId, setSeenId] = useState<string | undefined>();
   const [active, setActive] = useState<Run[]>([]);
-  const [lastDone, setLastDone] = useState<Run[]>([]);
   const [logTab, setLogTab] = useState<"log" | "action">("log");
   const activeRef = useRef<Run[]>([]);
   const buildingRef = useRef(false);
@@ -84,11 +83,18 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   useEffect(() => { buildingRef.current = building; }, [building]);
   useEffect(() => { setSeenId(repo ? seenRelease(repo) : undefined); }, [repo, release]);
 
-  // Futó action figyelése a kiválasztott repón: repóváltáskor, az appba visszalépéskor és időközönként.
+  // Az építés-panelben már követett futások azonosítói: ezeket a figyelő nem jelzi külön.
+  const panelIds = useRef<Set<number>>(new Set());
+  useEffect(() => { panelIds.current = new Set(runs.map((x) => x.id)); }, [runs]);
+
+  // Futó action figyelése: csak az a futás kap „Action folyamatban” fület, ami a repó megnyitásakor
+  // (pl. az app újranyitása után) már futott. Ami az appból indult, azt a build-panel mutatja.
   useEffect(() => {
-    setActive([]); setLastDone([]); setLogTab("log"); activeRef.current = [];
+    setActive([]); setLogTab("log"); activeRef.current = [];
     if (!repo) return;
     let alive = true;
+    let first = true;
+    const tracked = new Set<number>();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       if (!alive) return;
@@ -97,18 +103,24 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         try {
           const now = await gh.activeRuns(repo);
           if (!alive) return;
+          if (first) {
+            first = false;
+            now.filter((x) => !panelIds.current.has(x.id)).forEach((x) => tracked.add(x.id));
+            if (tracked.size) add(`Futó action: ${now.filter((x) => tracked.has(x.id)).map((x) => x.name).join(", ")} · nyisd meg az „Action” fület`);
+          }
+          const mine = now.filter((x) => tracked.has(x.id));
           const prev = activeRef.current;
-          if (now.length && !prev.length) add(`Futó action: ${now.map((x) => x.name).join(", ")} · nyisd meg az „Action” fület`);
-          if (!now.length && prev.length) {
+          if (prev.length && !mine.length) {
             const done = await gh.getRuns(repo, prev.map((x) => x.id)).catch(() => []);
             if (!alive) return;
-            setLastDone(done);
-            if (!buildingRef.current) add(`ACTION KÉSZ: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
+            add(`ACTION KÉSZ: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
+            tracked.clear();
+            setLogTab("log");
             setRelTick((n) => n + 1);
           }
-          activeRef.current = now;
-          setActive(now);
-          if (now.length) delay = 8000;
+          activeRef.current = mine;
+          setActive(mine);
+          if (mine.length) delay = 8000;
         } catch { /* hálózati hiba: a következő körben újra */ }
       }
       if (alive) timer = setTimeout(tick, delay);
@@ -419,17 +431,17 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         {repo && (
           <div className="flex shrink-0 gap-1 font-mono text-[11px]">
             <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
-            {(active.length > 0 || lastDone.length > 0) && (
+            {active.length > 0 && (
               <button onClick={() => setLogTab("action")} className={`flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
-                {active.length > 0 ? <><span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})</> : `Action kész: ${lastDone.map((x) => x.conclusion ?? x.status).join(", ")}`}
+                <span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})
               </button>
             )}
             <button onClick={refresh} title="Állapot frissítése" className="ml-auto rounded border border-border px-2 py-1">↻ Frissítés</button>
           </div>
         )}
-        {logTab === "action" && (active.length > 0 || lastDone.length > 0) ? (
+        {logTab === "action" && active.length > 0 ? (
           <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
-            {actionText(active.length ? active : lastDone)}
+            {actionText(active)}
           </pre>
         ) : (
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">

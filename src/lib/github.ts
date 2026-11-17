@@ -59,7 +59,9 @@ export class GitHub {
   private async raw(path: string, init: RequestInit = {}): Promise<Response> {
     const url = new URL(path.replace(/^\//, ""), API + "/");
     if (url.origin !== API) throw new Error("Csak az api.github.com hívható.");
+    // A GitHub API válaszai 60 mp-ig gyorsítótárazhatók: ettől maradt „beragadva” a régi állapot. Mindig friss kell.
     const res = await this.fetchImpl(url.href, {
+      cache: "no-store",
       ...init,
       headers: {
         Accept: "application/vnd.github+json",

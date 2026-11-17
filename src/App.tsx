@@ -42,6 +42,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [release, setRelease] = useState<LatestRelease | null>(null);
   const [relTick, setRelTick] = useState(0);
   const [pollTick, setPollTick] = useState(0);
+  const phases = useRef<Record<string, string>>({});
   const [seenId, setSeenId] = useState<string | undefined>();
   const [active, setActive] = useState<Run[]>([]);
   const [logTab, setLogTab] = useState<"log" | "action">("log");
@@ -173,6 +174,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         const r = await gh.buildStatus(repo, branch, since);
         if (stop) return;
         setRuns(r);
+        logPhases(r);
         const done = r.length > 0 && r.every((x) => x.status === "completed");
         if (done) { setBuilding(false); add(`BUILD KÉSZ: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); setRelTick((n) => n + 1); return; }
         // Ne ragadjon be: ha 2 percig nem indult futás, vagy 45 percnél tovább tart, feladjuk a várakozást.
@@ -188,6 +190,23 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     return () => { stop = true; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", wake); };
   }, [since, pollTick]);
 
+  // Az új build fázisait folyamatosan a naplóba írja (csak a változásokat).
+  function logPhases(rs: Run[]) {
+    const ph = phases.current;
+    const note = (k: string, v: string, line: string) => { if (ph[k] !== v) { ph[k] = v; add(line); } };
+    rs.forEach((x) => {
+      const st = x.conclusion ?? x.status;
+      note(`r${x.id}`, st, `${x.name}: ${st === "queued" ? "sorban áll" : st === "in_progress" ? "fut" : st}`);
+      x.jobs.forEach((j) => {
+        const total = j.steps.length;
+        j.steps.forEach((st2, i) => {
+          if (st2.status === "in_progress") note(`${x.id}/${j.name}/${i}`, "run", `  ▶ ${j.name} · ${st2.name} (${i + 1}/${total})`);
+          else if (st2.status === "completed" && st2.conclusion && !["success", "skipped"].includes(st2.conclusion)) note(`${x.id}/${j.name}/${i}`, st2.conclusion, `  ✖ ${j.name} · ${st2.name}: ${st2.conclusion}`);
+        });
+      });
+    });
+  }
+
   // Kézi frissítés: release, futó action és (ha követünk buildet) a build állapota is.
   function refresh() {
     setRelTick((n) => n + 1);
@@ -196,7 +215,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   }
 
   async function build() {
-    setBuilding(true); setRuns([]);
+    setBuilding(true); setRuns([]); phases.current = {}; setLogTab("log");
     const t = new Date(Date.now() - 5000).toISOString().replace(/\.\d+Z$/, "Z");
     try {
       const r = await gh.startBuild(repo, branch);

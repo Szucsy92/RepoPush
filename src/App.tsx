@@ -131,17 +131,19 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     let alive = true;
     let first = true;
     const tracked = new Set<number>();
+    const seenDone = new Set<number>(); // lezárult futások, amikről már tudunk
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inflight: Promise<void> | null = null;
     const body = async () => {
-      let delay = 30000;
+      let delay = 15000;
       if (document.visibilityState === "visible") {
         try {
-          const now = await gh.activeRuns(repo);
+          const { open: now, closed } = await gh.runsOverview(repo);
           if (!alive) return;
+          const first_ = first;
           const fresh = now.filter((x) => !tracked.has(x.id) && !panelIds.current.has(x.id));
           fresh.forEach((x) => tracked.add(x.id));
-          if (fresh.length) add(`${first ? "Futó action" : "Új action indult"}: ${fresh.map((x) => x.name).join(", ")}`);
+          if (fresh.length) add(`${first_ ? "Futó action" : "Új action indult"}: ${fresh.map((x) => x.name).join(", ")}`);
           first = false;
           const mine = now.filter((x) => tracked.has(x.id));
           const prev = activeRef.current;
@@ -151,10 +153,17 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             if (!alive) return;
             logPhases(done, actPhases.current);
             add(`ACTION KÉSZ: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
-            gone.forEach((x) => tracked.delete(x.id));
+            gone.forEach((x) => { tracked.delete(x.id); seenDone.add(x.id); });
             if (!mine.length) setLogTab("log");
             setRelTick((n) => n + 1);
           }
+          // Ami úgy futott le, hogy nem láttuk futni (gyors futás, két lekérdezés között): legalább az eredményét jelezzük.
+          const unseen = closed.filter((x) => !seenDone.has(x.id));
+          if (!first_) {
+            const quick = unseen.filter((x) => !tracked.has(x.id) && !panelIds.current.has(x.id));
+            if (quick.length) { add(`Action lefutott: ${quick.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ")}`); setRelTick((n) => n + 1); }
+          }
+          unseen.forEach((x) => seenDone.add(x.id));
           logPhases(mine, actPhases.current);
           if (!prev.length && mine.length) setLogTab("action");
           activeRef.current = mine;
@@ -562,16 +571,22 @@ function stepIcon(s: string, c: string | null) {
 }
 
 // Futó/lefutott action élő állapota: hol tart épp a build.
+const STATUS_HU: Record<string, string> = {
+  queued: "sorban áll", in_progress: "fut", requested: "indul",
+  waiting: "vár (jóváhagyásra vagy az előző futásra)", pending: "másik futás után indul (concurrency)",
+};
 function actionText(runs: Run[]): string {
   return runs.map((r) => {
-    const head = `${stepIcon(r.status, r.conclusion)} ${r.name} (${r.event}) · ${r.conclusion ?? r.status}`;
+    const mins = r.created ? Math.max(0, Math.round((Date.now() - Date.parse(r.created)) / 60000)) : null;
+    const since = r.created ? ` · ${new Date(r.created).toLocaleTimeString("hu-HU", { hour: "2-digit", minute: "2-digit" })}-kor indult (${mins} perce)` : "";
+    const head = `${stepIcon(r.status, r.conclusion)} ${r.name} (${r.event}) · ${r.conclusion ?? STATUS_HU[r.status] ?? r.status}${since}`;
     const jobs = r.jobs.length ? r.jobs.map((j) => {
       const done = j.steps.filter((x) => x.status === "completed").length;
       const cur = j.steps.find((x) => x.status === "in_progress");
       const where = j.status !== "completed" ? `\n    Most itt tart: ${cur ? cur.name : "várakozás a futtatóra"} (${done}/${j.steps.length})` : "";
       const steps = j.steps.map((x) => `      ${stepIcon(x.status, x.conclusion)} ${x.name}`).join("\n");
       return `  ${stepIcon(j.status, j.conclusion)} ${j.name}${where}\n${steps}`;
-    }).join("\n") : "  (még nincs job: a GitHub most állítja össze, vagy sorban áll a futtatóra)";
+    }).join("\n") : "  (még nincs job: a GitHub most állítja össze, sorban áll a futtatóra, vagy másik futás után indul; ha régóta így van, nyisd meg a futás oldalát)";
     return `${head}\n${jobs}\n  ${r.url}`;
   }).join("\n\n");
 }

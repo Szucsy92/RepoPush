@@ -14,7 +14,8 @@ export type Repo = { full_name: string; default_branch: string; private: boolean
 export type FileOp = { path: string; base64?: string; sha?: string; delete?: boolean };
 export type Step = { name: string; status: string; conclusion: string | null };
 export type Job = { name: string; status: string; conclusion: string | null; url: string; steps: Step[] };
-export type Run = { id: number; suite: number; name: string; event: string; status: string; conclusion: string | null; url: string; jobs: Job[] };
+export type Run = { id: number; suite: number; name: string; event: string; status: string; conclusion: string | null; url: string; created?: string; jobs: Job[] };
+export type RunBrief = { id: number; name: string; event: string; status: string; conclusion: string | null; url: string; created: string };
 
 export function friendlyError(status: number, body: string, h: Headers): string {
   let msg = "";
@@ -195,7 +196,7 @@ export class GitHub {
     return Promise.all(runs.map(async (run) => {
       const j = await this.req<{ jobs: any[] }>(`repos/${repo}/actions/runs/${run.id}/jobs`);
       return {
-        id: run.id, suite: run.check_suite_id, name: run.name, event: run.event, status: run.status, conclusion: run.conclusion, url: run.html_url,
+        id: run.id, suite: run.check_suite_id, name: run.name, event: run.event, status: run.status, conclusion: run.conclusion, url: run.html_url, created: run.created_at,
         jobs: j.jobs.map((x) => ({
           name: x.name, status: x.status, conclusion: x.conclusion, url: x.html_url,
           steps: (x.steps ?? []).map((s: any) => ({ name: s.name, status: s.status, conclusion: s.conclusion })),
@@ -209,14 +210,27 @@ export class GitHub {
     return this.withJobs(repo, r.workflow_runs);
   }
 
-  /** Az épp futó vagy sorban álló action-ök (bármilyen ágon, bárki indította). */
-  async activeRuns(repo: string): Promise<Run[]> {
-    const [a, b] = await Promise.all(
-      ["in_progress", "queued"].map((st) => this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=${st}&per_page=10`)),
-    );
-    const seen = new Set<number>();
-    const runs = [...a.workflow_runs, ...b.workflow_runs].filter((x) => !seen.has(x.id) && !!seen.add(x.id));
-    return this.withJobs(repo, runs);
+  /**
+   * Az épp nyitott (sorban álló, futó, várakozó) action-ök bármilyen ágon, bárki indította, és a legutóbb lezárultak.
+   * Az állapotra szűrt lista (?status=queued) elavult is lehet: egy már megszakadt vagy lefutott futást még sorban állónak
+   * mutat („szellem” futás). Ezért a nyitottnak látszó futásokat mindig a futás saját végpontján ellenőrizzük.
+   */
+  async runsOverview(repo: string): Promise<{ open: Run[]; closed: RunBrief[] }> {
+    const none = { workflow_runs: [] as any[] };
+    const [recent, queued, running] = await Promise.all([
+      this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?per_page=30`),
+      this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=queued&per_page=10`).catch(() => none),
+      this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=in_progress&per_page=10`).catch(() => none),
+    ]);
+    const done = new Map<number, any>();
+    const candidates = new Map<number, any>();
+    recent.workflow_runs.forEach((x) => (x.status === "completed" ? done : candidates).set(x.id, x));
+    [...queued.workflow_runs, ...running.workflow_runs].forEach((x) => { if (!done.has(x.id)) candidates.set(x.id, x); });
+    const fresh = await Promise.all([...candidates.values()].map((x) => this.req<any>(`repos/${repo}/actions/runs/${x.id}`).catch(() => x)));
+    const open: any[] = [];
+    fresh.forEach((x) => { if (x.status === "completed") done.set(x.id, x); else open.push(x); });
+    const brief = (x: any): RunBrief => ({ id: x.id, name: x.name, event: x.event, status: x.status, conclusion: x.conclusion, url: x.html_url, created: x.created_at });
+    return { open: await this.withJobs(repo, open), closed: [...done.values()].map(brief) };
   }
 
   /** Ismert futások aktuális állapota (pl. a végeredményük). */

@@ -35,18 +35,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          KS="$RUNNER_TEMP/release.keystore"
+          ENC="$RUNNER_TEMP/release.keystore.enc"
+          PASSFILE=""
+          HAS_BRANCH=0
+          if git ls-remote --exit-code --heads origin signing >/dev/null 2>&1; then
+            HAS_BRANCH=1
+            git fetch --depth=1 origin signing
+          fi
+
+          # Jelszó: ha van secret, azt használjuk; ha nincs, automatikus jelszó a `signing` ágon.
           if [ -z "${KS_PASS:-}" ]; then
-            echo "::error::Hiányzik az ANDROID_KEYSTORE_PASSWORD secret. Repo → Settings → Secrets and variables → Actions → New repository secret (legalább 20 karakter)."
-            exit 1
+            echo "::warning::Nincs ANDROID_KEYSTORE_PASSWORD secret, automatikus jelszót használok (a signing ágon tárolva). Biztonságosabb: állíts be secretet (Settings → Secrets and variables → Actions)."
+            if [ "$HAS_BRANCH" = 1 ] && git show FETCH_HEAD:keystore.pass >/dev/null 2>&1; then
+              KS_PASS="$(git show FETCH_HEAD:keystore.pass)"
+            else
+              KS_PASS="$(openssl rand -hex 24)"
+              PASSFILE="$KS_PASS"
+            fi
+            echo "::add-mask::$KS_PASS"
+            export KS_PASS
+            echo "KS_PASS=$KS_PASS" >> "$GITHUB_ENV"
           fi
           if [ "${#KS_PASS}" -lt 12 ]; then
             echo "::error::Az ANDROID_KEYSTORE_PASSWORD túl rövid (legalább 12, ajánlott 20+ karakter)."
             exit 1
           fi
-          KS="$RUNNER_TEMP/release.keystore"
-          ENC="$RUNNER_TEMP/release.keystore.enc"
-          if git ls-remote --exit-code --heads origin signing >/dev/null 2>&1; then
-            git fetch --depth=1 origin signing
+          if [ "$HAS_BRANCH" = 1 ]; then
             git show FETCH_HEAD:release.keystore.enc > "$ENC"
             openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:KS_PASS -in "$ENC" -out "$KS" \
               || { echo "::error::A kulcs nem fejthető vissza. Ugyanaz a jelszó van a secretben, mint a generáláskor?"; exit 1; }
@@ -59,11 +74,13 @@ jobs:
             openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:KS_PASS -in "$KS" -out "$ENC"
             d="$(mktemp -d)"
             cp "$ENC" "$d/release.keystore.enc"
+            if [ -n "$PASSFILE" ]; then printf '%s' "$PASSFILE" > "$d/keystore.pass"; fi
             cd "$d"
             git init -q -b signing
             git config user.name "github-actions"
             git config user.email "github-actions@users.noreply.github.com"
             git add release.keystore.enc
+            if [ -n "$PASSFILE" ]; then git add keystore.pass; fi
             git commit -q -m "Android signing key (encrypted, generated once)"
             git push -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" signing
             echo "Új aláíró kulcs létrehozva, titkosítva a 'signing' ágra mentve."

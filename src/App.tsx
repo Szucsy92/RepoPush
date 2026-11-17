@@ -431,23 +431,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         <button disabled={busy || !repo} onClick={run} className="truncate rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
         </button>
-        <div className="shrink-0 space-y-1.5">
-          <div className="flex items-center gap-1 font-mono text-[11px]">
-            {["Start", "Process", "Finish"].map((n, k) => {
-              const st = k + 1;
-              const cls = stage === -1 && st >= 2 ? "border-destructive text-destructive" : stage > st || (stage === 3 && st === 3) ? "border-primary bg-primary text-primary-foreground" : stage === st ? "border-primary text-primary animate-pulse" : "border-border text-muted-foreground";
-              return (
-                <div key={n} className="flex flex-1 items-center gap-1">
-                  <div className={`flex-1 rounded border px-2 py-1 text-center ${cls}`}>{n}</div>
-                  {k < 2 && <span className="text-muted-foreground">→</span>}
-                </div>
-              );
-            })}
+        {/* One bar: the fill is the progress from Start to Finish, the label names only the current stage. */}
+        <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="relative h-7 shrink-0 overflow-hidden rounded-md border border-border bg-muted font-mono text-[11px]">
+          <div className={`absolute inset-y-0 left-0 transition-all ${stage === -1 ? "bg-destructive/50" : "bg-primary/50"}`} style={{ width: `${pct}%` }} />
+          <div className="relative flex h-full items-center gap-1.5 px-2">
+            <span className={`shrink-0 font-bold ${stage === -1 ? "text-destructive" : stage === 1 || stage === 2 ? "animate-pulse" : ""}`}>{stage === -1 ? "Hiba" : stage === 1 ? "Start" : stage === 2 ? "Process" : stage === 3 ? "Finish" : "Várakozás"}</span>
+            <span className="min-w-0 flex-1 truncate">{stage === 0 ? "" : step}</span>
+            {stage !== 0 && <span className="shrink-0">{pct}%</span>}
           </div>
-          <div className="h-1.5 overflow-hidden rounded bg-muted">
-            <div className={`h-full transition-all ${stage === -1 ? "bg-destructive" : "bg-primary"}`} style={{ width: `${pct}%` }} />
-          </div>
-          <div className="truncate font-mono text-[11px] text-muted-foreground">{step || "Várakozás"}{pct ? ` · ${pct}%` : ""}</div>
         </div>
         {release && release.id !== seenId && !active.length && !building && (
           <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">

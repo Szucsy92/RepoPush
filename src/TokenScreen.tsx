@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Brand } from "@/Brand";
 import { GitHub } from "@/lib/github";
 import { saveToken } from "@/lib/token";
 
@@ -20,7 +21,7 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
   return (
     <main className="flex min-h-[100dvh] flex-col bg-background p-4 text-foreground">
       <div className="mx-auto w-full max-w-md space-y-3">
-        <div className="font-mono text-lg font-bold"><span className="text-primary">›</span> repopush</div>
+        <div className="text-lg"><Brand /></div>
         <h1 className="text-base font-bold">Token megadása</h1>
         <ol className="list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
           <li>GitHubon: <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token</b>.</li>

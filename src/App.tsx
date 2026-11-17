@@ -8,6 +8,8 @@ import { isNative } from "@/lib/native";
 import { markSeen, seenRelease } from "@/lib/seen";
 import { TokenScreen } from "@/TokenScreen";
 import { PinSetup, LockScreen } from "@/PinScreens";
+import { RepoPicker } from "@/RepoPicker";
+import { Brand } from "@/Brand";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
 
@@ -35,7 +37,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [step, setStep] = useState("");
 
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [filter, setFilter] = useState("");
   const [repo, setRepo] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
@@ -196,7 +197,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     };
   }, [gh, repo]);
 
-  const shown = useMemo(() => repos.filter((r) => r.full_name.toLowerCase().includes(filter.toLowerCase())), [repos, filter]);
   const targets = useMemo(() => (tab === "patch" && patch.trim() ? safe(() => patchTargets(patch), []) : []), [patch, tab]);
 
   async function onZip(f: File | undefined) {
@@ -392,7 +392,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
       onOk={() => { confirm.resolve(true); setConfirm(null); }} onCancel={() => { confirm.resolve(false); setConfirm(null); }} />}
     <main className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
       <header className="flex items-center justify-between border-b border-border px-3 py-2">
-        <div className="font-mono font-bold"><span className="text-primary">›</span> repopush</div>
+        <Brand />
         <div className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
           {me ? <><img src={me.avatar} alt="" className="h-5 w-5 rounded-full" />{me.login}</> : "kapcsolódás…"}
           <button onClick={() => { if (window.confirm("Kijelentkezel és törlöd a tokent erről az eszközről?")) onLogout(); }} className="ml-1 rounded border border-border px-1.5 py-0.5">Kijelentkezés</button>
@@ -401,10 +401,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
 
       <div className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 p-3">
         <div className="flex gap-2">
-          <select value={repo} onChange={(e) => setRepo(e.target.value)} className="field min-w-0 flex-[2] font-mono text-xs">
-            <option value="">{repos.length ? "Repó…" : "Betöltés…"}</option>
-            {repos.map((r) => <option key={r.full_name} value={r.full_name}>{r.private ? "🔒 " : ""}{r.full_name.split("/")[1]}</option>)}
-          </select>
+          <RepoPicker repos={repos} value={repo} onChange={setRepo} />
           {repoZip ? (
             <a href={repoZip} target="_blank" rel="noopener noreferrer" title={`Teljes repó letöltése (ZIP) · ${branch}`} aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-md border border-border bg-card">
               <Download className="h-4 w-4" />

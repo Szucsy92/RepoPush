@@ -97,6 +97,37 @@ jobs:
           N="${{ github.run_number }}"
           ./node_modules/.bin/cap add android
 
+          # Az app ne rajzolódjon az állapotsor/navigációs sáv alá (Android 15+ edge-to-edge):
+          # a tartalmat a rendszersávok alá toljuk, így a fejléc (kijelentkezés) elérhető marad.
+          MA="$(find android/app/src/main/java -name MainActivity.java | head -1)"
+          test -n "$MA" || { echo "::error::MainActivity.java nem található"; exit 1; }
+          PKG="$(grep -m1 -oP '^package \K[^;]+' "$MA")"
+          cat > "$MA" <<JAVA
+          package $PKG;
+
+          import android.os.Bundle;
+          import android.view.View;
+          import androidx.core.graphics.Insets;
+          import androidx.core.view.ViewCompat;
+          import androidx.core.view.WindowInsetsCompat;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+            @Override
+            public void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              View root = findViewById(android.R.id.content);
+              root.setBackgroundColor(0xFF0B0F14);
+              ViewCompat.setOnApplyWindowInsetsListener(root, (v, w) -> {
+                Insets i = w.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+                v.setPadding(i.left, i.top, i.right, i.bottom);
+                return WindowInsetsCompat.CONSUMED;
+              });
+            }
+          }
+          JAVA
+          sed -i 's/^          //' "$MA"
+
           # Az app tokent tárol: ne kerüljön Google-biztonsági mentésbe.
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
 

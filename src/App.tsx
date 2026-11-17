@@ -41,6 +41,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [log, setLog] = useState<string[]>([]);
   const [release, setRelease] = useState<LatestRelease | null>(null);
   const [relTick, setRelTick] = useState(0);
+  const [pollTick, setPollTick] = useState(0);
   const [seenId, setSeenId] = useState<string | undefined>();
   const [active, setActive] = useState<Run[]>([]);
   const [lastDone, setLastDone] = useState<Run[]>([]);
@@ -64,13 +65,21 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   }, [repo]);
 
   // Az épp kiválasztott repó legfrissebb release-e; build végén újratöltjük.
+  useEffect(() => { setRelease(null); }, [repo]);
   useEffect(() => {
-    setRelease(null);
     if (!repo) return;
     let alive = true;
     gh.latestRelease(repo).then((r) => { if (alive) setRelease(r); });
     return () => { alive = false; };
   }, [gh, repo, relTick]);
+  // Automatikus frissítés: percenként és az appba visszalépéskor, hogy ne ragadjon be a régi állapot.
+  useEffect(() => {
+    if (!repo) return;
+    const bump = () => { if (document.visibilityState === "visible") setRelTick((n) => n + 1); };
+    const iv = setInterval(bump, 60000);
+    document.addEventListener("visibilitychange", bump);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", bump); };
+  }, [repo]);
 
   useEffect(() => { buildingRef.current = building; }, [building]);
   useEffect(() => { setSeenId(repo ? seenRelease(repo) : undefined); }, [repo, release]);
@@ -144,19 +153,35 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   useEffect(() => {
     if (!since) return;
     let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const t0 = Date.now();
     const tick = async () => {
+      if (stop) return;
       try {
         const r = await gh.buildStatus(repo, branch, since);
         if (stop) return;
         setRuns(r);
         const done = r.length > 0 && r.every((x) => x.status === "completed");
         if (done) { setBuilding(false); add(`BUILD KÉSZ: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); setRelTick((n) => n + 1); return; }
+        // Ne ragadjon be: ha 2 percig nem indult futás, vagy 45 percnél tovább tart, feladjuk a várakozást.
+        if (!r.length && Date.now() - t0 > 120000) { setBuilding(false); add("Nem indult build ebben a 2 percben. Nézd meg az Actions oldalt, vagy indíts újat."); return; }
+        if (Date.now() - t0 > 45 * 60000) { setBuilding(false); add("A build követése időtúllépés miatt leállt (45 perc). A ↻ gombbal újra lekérdezheted."); return; }
       } catch (e: any) { add(`Build állapot hiba: ${e.message}`); }
-      if (!stop) setTimeout(tick, 4000);
+      if (!stop) timer = setTimeout(tick, 4000);
     };
+    // Visszalépéskor azonnal újra lekérdez (a háttérben az időzítők lassulnak).
+    const wake = () => { if (document.visibilityState === "visible") { if (timer) clearTimeout(timer); tick(); } };
+    document.addEventListener("visibilitychange", wake);
     tick();
-    return () => { stop = true; };
-  }, [since]);
+    return () => { stop = true; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", wake); };
+  }, [since, pollTick]);
+
+  // Kézi frissítés: release, futó action és (ha követünk buildet) a build állapota is.
+  function refresh() {
+    setRelTick((n) => n + 1);
+    setPollTick((n) => n + 1);
+    pokeRef.current?.();
+  }
 
   async function build() {
     setBuilding(true); setRuns([]);
@@ -352,7 +377,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         {release && release.id !== seenId && !active.length && !building && (
           <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">
             <div className="flex items-center gap-1">
-              <div className="flex-1 truncate text-muted-foreground">Friss, még le nem töltött release: {release.name} · {new Date(release.published).toLocaleDateString("hu-HU")}</div>
+              <div className="flex-1 truncate text-muted-foreground">Utolsó APK elérhető: {release.name} · {stamp(release.published)}</div>
               <button onClick={() => { markSeen(repo, release.id); setSeenId(release.id); }} className="rounded border border-border px-1.5 py-0.5">elrejt</button>
             </div>
             {release.assets.map((a) => (
@@ -391,12 +416,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             {building && !runs.length && <div className="animate-pulse text-muted-foreground">Várakozás a GitHubra…</div>}
           </div>
         )}
-        {(active.length > 0 || lastDone.length > 0) && (
+        {repo && (
           <div className="flex shrink-0 gap-1 font-mono text-[11px]">
             <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
-            <button onClick={() => setLogTab("action")} className={`flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
-              {active.length > 0 ? <><span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})</> : `Action kész: ${lastDone.map((x) => x.conclusion ?? x.status).join(", ")}`}
-            </button>
+            {(active.length > 0 || lastDone.length > 0) && (
+              <button onClick={() => setLogTab("action")} className={`flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
+                {active.length > 0 ? <><span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})</> : `Action kész: ${lastDone.map((x) => x.conclusion ?? x.status).join(", ")}`}
+              </button>
+            )}
+            <button onClick={refresh} title="Állapot frissítése" className="ml-auto rounded border border-border px-2 py-1">↻ Frissítés</button>
           </div>
         )}
         {logTab === "action" && (active.length > 0 || lastDone.length > 0) ? (
@@ -412,6 +440,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     </main>
     </>
   );
+}
+
+// Dátum + idő (helyi idő), hogy a release-ek megkülönböztethetők legyenek.
+function stamp(iso: string): string {
+  return new Date(iso).toLocaleString("hu-HU", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function stepIcon(s: string, c: string | null) {

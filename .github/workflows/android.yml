@@ -167,19 +167,25 @@ jobs:
           BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
           U="$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)"
           test -n "$U" || { echo "::error::Nem készült APK"; exit 1; }
+          # Dátumbélyeges név (budapesti idő), hogy a verziók megkülönböztethetők legyenek.
+          STAMP="$(TZ=Europe/Budapest date '+%Y%m%d-%H%M')"
+          HUMAN="$(TZ=Europe/Budapest date '+%Y-%m-%d %H:%M')"
+          APK="RepoPush-1.0.${{ github.run_number }}-$STAMP.apk"
+          echo "APK_FILE=$APK" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=RepoPush 1.0.${{ github.run_number }} ($HUMAN)" >> "$GITHUB_ENV"
           "$BT/zipalign" -p -f 4 "$U" aligned.apk
           "$BT/apksigner" sign --ks "$KS_FILE" --ks-pass env:KS_PASS --key-pass env:KS_PASS \
-            --ks-key-alias "$KS_ALIAS" --out RepoPush.apk aligned.apk
-          "$BT/apksigner" verify --print-certs RepoPush.apk
+            --ks-key-alias "$KS_ALIAS" --out "$APK" aligned.apk
+          "$BT/apksigner" verify --print-certs "$APK"
 
       - uses: actions/upload-artifact@v4
         with:
           name: RepoPush-apk
-          path: RepoPush.apk
+          path: ${{ env.APK_FILE }}
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: RepoPush 1.0.${{ github.run_number }}
+          name: ${{ env.RELEASE_NAME }}
           body: Telepíthető, aláírt Android APK. Letöltés után nyisd meg a telefonon (ismeretlen forrásból telepítés engedélyezése kellhet).
-          files: RepoPush.apk
+          files: ${{ env.APK_FILE }}

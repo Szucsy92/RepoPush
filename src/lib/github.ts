@@ -2,7 +2,7 @@
 // ever sent to API (https://api.github.com). Never log it or put it into a URL.
 export const API = "https://api.github.com";
 export type ReleaseAsset = { name: string; url: string; size: number };
-export type LatestRelease = { tag: string; name: string; published: string; assets: ReleaseAsset[] };
+export type LatestRelease = { id: string; tag: string; name: string; published: string; assets: ReleaseAsset[] };
 
 export class GitHubError extends Error {
   constructor(message: string, public status: number) {
@@ -40,11 +40,11 @@ export class GitHub {
   /** Bármelyik repó legfrissebb release-e a letölthető fájlokkal (APK-k elöl); null, ha nincs release vagy fájl. */
   async latestRelease(repo: string): Promise<LatestRelease | null> {
     try {
-      const r = await this.req<{ tag_name: string; name: string | null; published_at: string; assets: { name: string; size: number; browser_download_url: string }[] }>(`repos/${repo}/releases/latest`);
+      const r = await this.req<{ id: number; tag_name: string; name: string | null; published_at: string; assets: { name: string; size: number; browser_download_url: string }[] }>(`repos/${repo}/releases/latest`);
       const assets = r.assets
         .map((a) => ({ name: a.name, url: a.browser_download_url, size: a.size }))
         .sort((x, y) => Number(y.name.endsWith(".apk")) - Number(x.name.endsWith(".apk")));
-      return assets.length ? { tag: r.tag_name, name: r.name || r.tag_name, published: r.published_at, assets } : null;
+      return assets.length ? { id: String(r.id), tag: r.tag_name, name: r.name || r.tag_name, published: r.published_at, assets } : null;
     } catch {
       return null;
     }
@@ -189,9 +189,8 @@ export class GitHub {
     return { started, skipped, total: w.workflows.length };
   }
 
-  async buildStatus(repo: string, branch: string, since: string): Promise<Run[]> {
-    const r = await this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&created=${encodeURIComponent(">=" + since)}&per_page=20`);
-    return Promise.all(r.workflow_runs.map(async (run) => {
+  private async withJobs(repo: string, runs: any[]): Promise<Run[]> {
+    return Promise.all(runs.map(async (run) => {
       const j = await this.req<{ jobs: any[] }>(`repos/${repo}/actions/runs/${run.id}/jobs`);
       return {
         id: run.id, suite: run.check_suite_id, name: run.name, event: run.event, status: run.status, conclusion: run.conclusion, url: run.html_url,
@@ -201,6 +200,27 @@ export class GitHub {
         })),
       };
     }));
+  }
+
+  async buildStatus(repo: string, branch: string, since: string): Promise<Run[]> {
+    const r = await this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&created=${encodeURIComponent(">=" + since)}&per_page=20`);
+    return this.withJobs(repo, r.workflow_runs);
+  }
+
+  /** Az épp futó vagy sorban álló action-ök (bármilyen ágon, bárki indította). */
+  async activeRuns(repo: string): Promise<Run[]> {
+    const [a, b] = await Promise.all(
+      ["in_progress", "queued"].map((st) => this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=${st}&per_page=10`)),
+    );
+    const seen = new Set<number>();
+    const runs = [...a.workflow_runs, ...b.workflow_runs].filter((x) => !seen.has(x.id) && !!seen.add(x.id));
+    return this.withJobs(repo, runs);
+  }
+
+  /** Ismert futások aktuális állapota (pl. a végeredményük). */
+  async getRuns(repo: string, ids: number[]): Promise<Run[]> {
+    const runs = await Promise.all(ids.map((id) => this.req<any>(`repos/${repo}/actions/runs/${id}`)));
+    return this.withJobs(repo, runs);
   }
 }
 

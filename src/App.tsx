@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, clearToken } from "@/lib/token";
 import { isNative } from "@/lib/native";
+import { markSeen, seenRelease } from "@/lib/seen";
 import { TokenScreen } from "@/TokenScreen";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
@@ -40,6 +41,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [log, setLog] = useState<string[]>([]);
   const [release, setRelease] = useState<LatestRelease | null>(null);
   const [relTick, setRelTick] = useState(0);
+  const [seenId, setSeenId] = useState<string | undefined>();
+  const [active, setActive] = useState<Run[]>([]);
+  const [lastDone, setLastDone] = useState<Run[]>([]);
+  const [logTab, setLogTab] = useState<"log" | "action">("log");
+  const activeRef = useRef<Run[]>([]);
+  const buildingRef = useRef(false);
+  const pokeRef = useRef<(() => void) | null>(null);
   const [drag, setDrag] = useState(false);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
@@ -63,6 +71,52 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     gh.latestRelease(repo).then((r) => { if (alive) setRelease(r); });
     return () => { alive = false; };
   }, [gh, repo, relTick]);
+
+  useEffect(() => { buildingRef.current = building; }, [building]);
+  useEffect(() => { setSeenId(repo ? seenRelease(repo) : undefined); }, [repo, release]);
+
+  // Futó action figyelése a kiválasztott repón: repóváltáskor, az appba visszalépéskor és időközönként.
+  useEffect(() => {
+    setActive([]); setLastDone([]); setLogTab("log"); activeRef.current = [];
+    if (!repo) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      if (!alive) return;
+      let delay = 30000;
+      if (document.visibilityState === "visible") {
+        try {
+          const now = await gh.activeRuns(repo);
+          if (!alive) return;
+          const prev = activeRef.current;
+          if (now.length && !prev.length) add(`Futó action: ${now.map((x) => x.name).join(", ")} · nyisd meg az „Action” fület`);
+          if (!now.length && prev.length) {
+            const done = await gh.getRuns(repo, prev.map((x) => x.id)).catch(() => []);
+            if (!alive) return;
+            setLastDone(done);
+            if (!buildingRef.current) add(`ACTION KÉSZ: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
+            setRelTick((n) => n + 1);
+          }
+          activeRef.current = now;
+          setActive(now);
+          if (now.length) delay = 8000;
+        } catch { /* hálózati hiba: a következő körben újra */ }
+      }
+      if (alive) timer = setTimeout(tick, delay);
+    };
+    const wake = () => { if (document.visibilityState === "visible") { if (timer) clearTimeout(timer); tick(); } };
+    pokeRef.current = wake;
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("focus", wake);
+    tick();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("focus", wake);
+      pokeRef.current = null;
+    };
+  }, [gh, repo]);
 
   const shown = useMemo(() => repos.filter((r) => r.full_name.toLowerCase().includes(filter.toLowerCase())), [repos, filter]);
   const targets = useMemo(() => (tab === "patch" && patch.trim() ? safe(() => patchTargets(patch), []) : []), [patch, tab]);
@@ -199,6 +253,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         add(`FINISH ✔ ${r.count} módosítás · ${r.url}`);
       }
       setStage(3); setPct(100); setStep("Kész");
+      setTimeout(() => pokeRef.current?.(), 5000);
     } catch (e: any) {
       add(`HIBA ✖ ${e.message ?? e}`);
       setStage(-1); setStep("Megszakadt");
@@ -294,11 +349,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </div>
           <div className="truncate font-mono text-[11px] text-muted-foreground">{step || "Várakozás"}{pct ? ` · ${pct}%` : ""}</div>
         </div>
-        {release && (
+        {release && release.id !== seenId && !active.length && !building && (
           <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">
-            <div className="truncate text-muted-foreground">Legfrissebb release: {release.name} · {new Date(release.published).toLocaleDateString("hu-HU")}</div>
+            <div className="flex items-center gap-1">
+              <div className="flex-1 truncate text-muted-foreground">Friss, még le nem töltött release: {release.name} · {new Date(release.published).toLocaleDateString("hu-HU")}</div>
+              <button onClick={() => { markSeen(repo, release.id); setSeenId(release.id); }} className="rounded border border-border px-1.5 py-0.5">elrejt</button>
+            </div>
             {release.assets.map((a) => (
-              <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded bg-secondary px-2 py-1.5 text-secondary-foreground">
+              <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer" onClick={() => { markSeen(repo, release.id); setTimeout(() => setSeenId(release.id), 400); }} className="flex items-center gap-1 rounded bg-secondary px-2 py-1.5 text-secondary-foreground">
                 <span>⬇</span><span className="flex-1 truncate">{a.name}</span><span className="text-muted-foreground">{a.size >= 1048576 ? (a.size / 1048576).toFixed(1) + " MB" : Math.ceil(a.size / 1024) + " KB"}</span>
               </a>
             ))}
@@ -333,13 +391,47 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             {building && !runs.length && <div className="animate-pulse text-muted-foreground">Várakozás a GitHubra…</div>}
           </div>
         )}
+        {(active.length > 0 || lastDone.length > 0) && (
+          <div className="flex shrink-0 gap-1 font-mono text-[11px]">
+            <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
+            <button onClick={() => setLogTab("action")} className={`flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
+              {active.length > 0 ? <><span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})</> : `Action kész: ${lastDone.map((x) => x.conclusion ?? x.status).join(", ")}`}
+            </button>
+          </div>
+        )}
+        {logTab === "action" && (active.length > 0 || lastDone.length > 0) ? (
+          <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
+            {actionText(active.length ? active : lastDone)}
+          </pre>
+        ) : (
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2 font-mono text-[10px] text-muted-foreground">
           {log.length ? log.join("\n") : "Napló…"}
         </pre>
+        )}
       </div>
     </main>
     </>
   );
+}
+
+function stepIcon(s: string, c: string | null) {
+  if (s !== "completed") return s === "in_progress" ? "▶" : "○";
+  return c === "success" ? "✔" : c === "skipped" || c === "cancelled" ? "–" : "✖";
+}
+
+// Futó/lefutott action élő állapota: hol tart épp a build.
+function actionText(runs: Run[]): string {
+  return runs.map((r) => {
+    const head = `${stepIcon(r.status, r.conclusion)} ${r.name} (${r.event}) · ${r.conclusion ?? r.status}`;
+    const jobs = r.jobs.map((j) => {
+      const done = j.steps.filter((x) => x.status === "completed").length;
+      const cur = j.steps.find((x) => x.status === "in_progress");
+      const where = j.status !== "completed" ? `\n    Most itt tart: ${cur ? cur.name : "várakozás a futtatóra"} (${done}/${j.steps.length})` : "";
+      const steps = j.steps.map((x) => `      ${stepIcon(x.status, x.conclusion)} ${x.name}`).join("\n");
+      return `  ${stepIcon(j.status, j.conclusion)} ${j.name}${where}\n${steps}`;
+    }).join("\n");
+    return `${head}\n${jobs}\n  ${r.url}`;
+  }).join("\n\n");
 }
 
 function dot(s: string, c: string | null) {

@@ -2,18 +2,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
-import { loadToken, clearToken } from "@/lib/token";
+import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
+import { hasVault } from "@/lib/lock";
 import { isNative } from "@/lib/native";
 import { markSeen, seenRelease } from "@/lib/seen";
 import { TokenScreen } from "@/TokenScreen";
+import { PinSetup, LockScreen } from "@/PinScreens";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
 
 export default function App() {
   const [me, setMe] = useState<{ login: string; avatar: string } | null>(null);
   const [token, setToken] = useState<string | null>(() => loadToken());
-  if (!token) return <TokenScreen onDone={(t, u) => { setToken(t); setMe(u); }} />;
-  return <Main key={token} token={token} me={me} setMe={setMe} onLogout={() => { clearToken(); setToken(null); setMe(null); }} />;
+  // Token that still needs a PIN: just entered, or a plain-text one an older version left behind.
+  const [pending, setPending] = useState<string | null>(() => loadLegacyToken());
+  const logout = () => { clearToken(); setToken(null); setPending(null); setMe(null); };
+  if (token) return <Main key={token} token={token} me={me} setMe={setMe} onLogout={logout} />;
+  if (pending) return <PinSetup token={pending} onDone={(t) => { setPending(null); setToken(t); }} onBack={logout} />;
+  if (hasVault()) return <LockScreen onUnlock={setToken} onForgot={logout} />;
+  return <TokenScreen onDone={(t, u, remember) => { setMe(u); if (remember) setPending(t); else setToken(t); }} />;
 }
 
 function Main({ token, me, setMe, onLogout }: { token: string; me: { login: string; avatar: string } | null; setMe: (m: { login: string; avatar: string }) => void; onLogout: () => void }) {

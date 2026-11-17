@@ -2,7 +2,7 @@ import { useState } from "react";
 import { GitHub } from "@/lib/github";
 import { saveToken } from "@/lib/token";
 
-export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: string; avatar: string }) => void }) {
+export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: string; avatar: string }, remember: boolean) => void }) {
   const [token, setToken] = useState("");
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -36,7 +36,7 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
         />
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          Token megjegyzése ezen az eszközön
+          Token megjegyzése ezen az eszközön (PIN-kóddal védve)
         </label>
         {err && <div className="rounded border border-destructive p-2 text-xs text-destructive">{err}</div>}
         {me ? (
@@ -44,7 +44,7 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
             <div className="flex items-center gap-2 rounded border border-border p-2 font-mono text-sm">
               <img src={me.avatar} alt="" className="h-8 w-8 rounded-full" /> {me.login}
             </div>
-            <button onClick={() => { saveToken(token.trim(), remember); onDone(token.trim(), me); }} className="w-full rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground">
+            <button onClick={() => { saveToken(token.trim(), remember); onDone(token.trim(), me, remember); }} className="w-full rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground">
               Mentés és tovább
             </button>
           </div>

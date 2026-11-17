@@ -131,6 +131,9 @@ jobs:
           # Az app tokent tárol: ne kerüljön Google-biztonsági mentésbe.
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
 
+          # Biometrikus feloldás (ujjlenyomat/arc) a PIN mellett.
+          grep -q USE_BIOMETRIC android/app/src/main/AndroidManifest.xml || sed -i 's#<application#<uses-permission android:name="android.permission.USE_BIOMETRIC" />\n    <application#' android/app/src/main/AndroidManifest.xml
+
           # Növekvő verziószám, hogy az új APK az előzőre telepíthető legyen.
           G=android/app/build.gradle
           sed -i -E "s/versionCode [0-9]+/versionCode $N/; s/versionName \"[^\"]*\"/versionName \"1.0.$N\"/" "$G"

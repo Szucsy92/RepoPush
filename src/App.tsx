@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Download } from "lucide-react";
+import { ChevronDown, Download, RefreshCw, X } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
@@ -58,6 +58,9 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const buildingRef = useRef(false);
   const pokeRef = useRef<(() => void) | null>(null);
   const [drag, setDrag] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const patchInputRef = useRef<HTMLInputElement>(null);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
   // Build status strip: one line with the current step; tapping it drops down the full run list.
@@ -226,11 +229,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     rs.forEach((x) => {
       const st = x.conclusion ?? x.status;
       note(`r${x.id}`, st, `${x.name}: ${st === "queued" ? "sorban áll" : st === "in_progress" ? "fut" : st}`);
+      if (!x.jobs.length && x.status !== "completed") note(`r${x.id}/waiting`, x.status, `  ○ GitHub runnerre vár · ${x.status}`);
       x.jobs.forEach((j) => {
+        note(`r${x.id}/job/${j.name}`, `${j.status}:${j.conclusion ?? ""}`, `  ${stepIcon(j.status, j.conclusion)} Job: ${j.name} · ${j.conclusion ?? j.status}`);
         const total = j.steps.length;
         j.steps.forEach((st2, i) => {
-          if (st2.status === "in_progress") note(`${x.id}/${j.name}/${i}`, "run", `  ▶ ${j.name} · ${st2.name} (${i + 1}/${total})`);
-          else if (st2.status === "completed" && st2.conclusion && !["success", "skipped"].includes(st2.conclusion)) note(`${x.id}/${j.name}/${i}`, st2.conclusion, `  ✖ ${j.name} · ${st2.name}: ${st2.conclusion}`);
+          const state = `${st2.status}:${st2.conclusion ?? ""}`;
+          note(`${x.id}/${j.name}/${i}`, state, `    ${stepIcon(st2.status, st2.conclusion)} ${st2.name}${st2.status === "completed" ? ` · ${st2.conclusion ?? "kész"}` : st2.status === "in_progress" ? ` (${i + 1}/${total})` : " · várakozik"}`);
         });
       });
     });
@@ -238,9 +243,17 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
 
   // Kézi frissítés: release, futó action és (ha követünk buildet) a build állapota is.
   function refresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    add("Frissítés: GitHub állapot lekérdezése…");
     setRelTick((n) => n + 1);
     setPollTick((n) => n + 1);
     pokeRef.current?.();
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      setRefreshing(false);
+      add("Frissítési kérés elküldve.");
+    }, 900);
   }
 
   async function build() {
@@ -412,11 +425,17 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </>
         ) : (
           <>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => patchInputRef.current?.click()} className="flex-1 rounded-md border border-border bg-card px-3 py-2 text-left font-mono text-xs">Diff / patch fájl tallózása…</button>
+              <button type="button" onClick={() => { setPatch(""); if (patchInputRef.current) patchInputRef.current.value = ""; add("A betöltött diff törölve."); }} disabled={!patch.trim()} title="Betöltött diff törlése" aria-label="Diff törlése" className="flex items-center gap-1 rounded-md border border-border px-3 py-2 font-mono text-xs disabled:opacity-35"><X className="h-3.5 w-3.5" /> Clear</button>
+              <input ref={patchInputRef} type="file" accept=".patch,.diff,.txt" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) { setPatch(await f.text()); add(`Diff betöltve: ${f.name}`); } e.currentTarget.value = ""; }} />
+            </div>
             <textarea
               value={patch}
               onChange={(e) => setPatch(e.target.value)}
-              placeholder="Diff / patch beillesztése vagy .patch fájl behúzása"
-              onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
+              placeholder="Diff / patch beillesztése vagy fájl kiválasztása / behúzása"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { setPatch(await f.text()); add(`Diff betöltve: ${f.name}`); } }}
               className="field h-28 shrink-0 resize-none font-mono text-xs"
             />
             {targets.length > 0 && (
@@ -462,7 +481,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 <span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})
               </button>
             )}
-            <button onClick={refresh} title="Állapot frissítése" className="ml-auto rounded border border-border px-2 py-1">↻ Frissítés</button>
+            <button onClick={refresh} disabled={refreshing} title="Állapot frissítése" className="ml-auto inline-flex items-center gap-1 rounded border border-border px-2 py-1 disabled:opacity-60"><RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />{refreshing ? "Frissítés…" : "Frissítés"}</button>
           </div>
         )}
         {stage === 3 && (
@@ -509,7 +528,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </pre>
         ) : (
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
-          {log.length ? log.join("\n") : "Napló…"}
+          {[log.length ? log.join("\n") : "Napló…", ...((active.length && logTab === "log") ? ["\n── Élő GitHub Actions állapot ──\n" + actionText(active)] : [])].join("\n")}
         </pre>
         )}
         </div>

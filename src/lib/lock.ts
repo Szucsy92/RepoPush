@@ -108,13 +108,9 @@ export async function enableBiometric(pin: string): Promise<BioResult> {
   let device = "";
   try {
     const b = await stage("plugin betöltése", bio);
-    const availability = await stage("eszköz-ellenőrzés", () => b.isAvailable(), 8000);
-    device = JSON.stringify(availability);
-    if (!availability?.isAvailable) {
-      const kind = availability?.biometryType ? ` (${availability.biometryType})` : "";
-      throw new Error(`A készülék nem jelez használható biometrikus azonosítót${kind}. Ellenőrizd, hogy van-e rögzített ujjlenyomat/arc és be van-e állítva a képernyőzár.`);
-    }
-    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush", subtitle: "Azonosítsd magad", negativeButtonText: "Mégse" }));
+    // The device's own answer is only reported, never trusted to block: the real prompt decides.
+    try { device = JSON.stringify(await stage("eszköz-ellenőrzés", () => b.isAvailable(), 8000)); } catch (e) { device = errText(e); }
+    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" }));
     await stage("PIN mentése", () => b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER }));
     localStorage.setItem(BIO, "1");
     localStorage.removeItem(BIO_ERR);
@@ -131,12 +127,8 @@ export async function enableBiometric(pin: string): Promise<BioResult> {
 export async function unlockWithBiometric(): Promise<{ pin: string } | { reason: string }> {
   try {
     const b = await stage("plugin betöltése", bio);
-    const availability = await stage("eszköz-ellenőrzés", () => b.isAvailable(), 8000);
-    if (!availability?.isAvailable) throw new Error("A készüléken nincs beállított vagy elérhető biometrikus azonosító. Válaszd a PIN-kódot, majd ellenőrizd az Android beállításait.");
-    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Feloldás", title: "RepoPush", subtitle: "Azonosítsd magad", negativeButtonText: "Mégse" }));
-    const credentials = await stage("PIN olvasása", () => b.getCredentials({ server: BIO_SERVER }));
-    if (!credentials?.password) throw new Error("A biometrikus tárban nem található PIN. Kapcsold be újra a biometrikus feloldást a PIN megadása után.");
-    return { pin: credentials.password };
+    await stage("ujjlenyomat-kérés", () => b.verifyIdentity({ reason: "Feloldás", title: "RepoPush" }));
+    return { pin: (await stage("PIN olvasása", () => b.getCredentials({ server: BIO_SERVER }))).password };
   } catch (e) { return { reason: errText(e) }; }
 }
 

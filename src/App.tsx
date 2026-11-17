@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { GitHub, planZip, type ApkRelease, type Plan, type Repo, type Run } from "@/lib/github";
+import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, clearToken } from "@/lib/token";
 import { isNative } from "@/lib/native";
@@ -38,12 +38,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [apk, setApk] = useState<ApkRelease | null>(null);
-  useEffect(() => {
-    let alive = true;
-    gh.latestApk().then((r) => { if (alive) setApk(r); });
-    return () => { alive = false; };
-  }, [gh]);
+  const [release, setRelease] = useState<LatestRelease | null>(null);
+  const [relTick, setRelTick] = useState(0);
   const [drag, setDrag] = useState(false);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
@@ -58,6 +54,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     setBranch(r?.default_branch ?? "main");
     gh.listBranches(repo).then(setBranches);
   }, [repo]);
+
+  // Az épp kiválasztott repó legfrissebb release-e; build végén újratöltjük.
+  useEffect(() => {
+    setRelease(null);
+    if (!repo) return;
+    let alive = true;
+    gh.latestRelease(repo).then((r) => { if (alive) setRelease(r); });
+    return () => { alive = false; };
+  }, [gh, repo, relTick]);
 
   const shown = useMemo(() => repos.filter((r) => r.full_name.toLowerCase().includes(filter.toLowerCase())), [repos, filter]);
   const targets = useMemo(() => (tab === "patch" && patch.trim() ? safe(() => patchTargets(patch), []) : []), [patch, tab]);
@@ -91,7 +96,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         if (stop) return;
         setRuns(r);
         const done = r.length > 0 && r.every((x) => x.status === "completed");
-        if (done) { setBuilding(false); add(`BUILD KÉSZ: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); return; }
+        if (done) { setBuilding(false); add(`BUILD KÉSZ: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); setRelTick((n) => n + 1); return; }
       } catch (e: any) { add(`Build állapot hiba: ${e.message}`); }
       if (!stop) setTimeout(tick, 4000);
     };
@@ -215,13 +220,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         </div>
       </header>
 
-      {apk && (
-        <a href={apk.url} target="_blank" rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 border-b border-border bg-secondary px-3 py-2 font-mono text-xs text-secondary-foreground">
-          ⬇ Legfrissebb APK letöltése ({apk.tag}, {new Date(apk.published).toLocaleDateString("hu-HU")})
-        </a>
-      )}
-
       <div className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 p-3">
         <div className="flex gap-2">
           <select value={repo} onChange={(e) => setRepo(e.target.value)} className="field min-w-0 flex-[2] font-mono text-xs">
@@ -296,6 +294,16 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </div>
           <div className="truncate font-mono text-[11px] text-muted-foreground">{step || "Várakozás"}{pct ? ` · ${pct}%` : ""}</div>
         </div>
+        {release && (
+          <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">
+            <div className="truncate text-muted-foreground">Legfrissebb release: {release.name} · {new Date(release.published).toLocaleDateString("hu-HU")}</div>
+            {release.assets.map((a) => (
+              <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded bg-secondary px-2 py-1.5 text-secondary-foreground">
+                <span>⬇</span><span className="flex-1 truncate">{a.name}</span><span className="text-muted-foreground">{a.size >= 1048576 ? (a.size / 1048576).toFixed(1) + " MB" : Math.ceil(a.size / 1024) + " KB"}</span>
+              </a>
+            ))}
+          </div>
+        )}
         {stage === 3 && (
           <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">
             <div className="flex gap-1">

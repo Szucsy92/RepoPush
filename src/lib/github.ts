@@ -1,8 +1,8 @@
 // Direct, browser-side GitHub REST client. The token is passed in explicitly and is only
 // ever sent to API (https://api.github.com). Never log it or put it into a URL.
 export const API = "https://api.github.com";
-export const APP_REPO = "Szucsy92/github-zip-uploader";
-export type ApkRelease = { tag: string; url: string; published: string };
+export type ReleaseAsset = { name: string; url: string; size: number };
+export type LatestRelease = { tag: string; name: string; published: string; assets: ReleaseAsset[] };
 
 export class GitHubError extends Error {
   constructor(message: string, public status: number) {
@@ -37,12 +37,14 @@ export class GitHub {
   rate: { remaining: number; limit: number; reset: number } | null = null;
   constructor(private token: string, private fetchImpl: typeof fetch = (...a) => fetch(...a)) {}
 
-  /** A legfrissebb release RepoPush.apk-ja; null, ha még nincs kész release. */
-  async latestApk(repo: string = APP_REPO): Promise<ApkRelease | null> {
+  /** Bármelyik repó legfrissebb release-e a letölthető fájlokkal (APK-k elöl); null, ha nincs release vagy fájl. */
+  async latestRelease(repo: string): Promise<LatestRelease | null> {
     try {
-      const r = await this.req<{ tag_name: string; published_at: string; assets: { name: string; browser_download_url: string }[] }>(`repos/${repo}/releases/latest`);
-      const a = r.assets.find((x) => x.name === "RepoPush.apk") ?? r.assets.find((x) => x.name.endsWith(".apk"));
-      return a ? { tag: r.tag_name, url: a.browser_download_url, published: r.published_at } : null;
+      const r = await this.req<{ tag_name: string; name: string | null; published_at: string; assets: { name: string; size: number; browser_download_url: string }[] }>(`repos/${repo}/releases/latest`);
+      const assets = r.assets
+        .map((a) => ({ name: a.name, url: a.browser_download_url, size: a.size }))
+        .sort((x, y) => Number(y.name.endsWith(".apk")) - Number(x.name.endsWith(".apk")));
+      return assets.length ? { tag: r.tag_name, name: r.name || r.tag_name, published: r.published_at, assets } : null;
     } catch {
       return null;
     }

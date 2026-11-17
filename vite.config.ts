@@ -1,18 +1,44 @@
-// @lovable.dev/vite-tanstack-config already includes the following — do NOT add them manually
-// or the app will break with duplicate plugins:
-//   - TanStack devtools (dev-only, first), tanstackStart, viteReact, tailwindcss, tsConfigPaths,
-//     nitro (build-only using cloudflare as a default target), VITE_* env injection, @ path alias,
-//     React/TanStack dedupe, error logger plugins, and sandbox detection (port/host/strictPort).
-// Never set ssr.external or resolve.external: the Worker has no runtime module resolution, so
-// the build fails. Never add compression (compressPublicAssets, vite-plugin-compression):
-// hosting already compresses at the edge.
-// You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
-import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { defineConfig, type Plugin } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { VitePWA } from "vite-plugin-pwa";
+import path from "node:path";
+
+// CSP only in production builds: the dev server needs inline HMR scripts and websockets.
+const CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data: blob: https://avatars.githubusercontent.com; " +
+  "connect-src 'self' https://api.github.com; worker-src 'self'; manifest-src 'self'; " +
+  "object-src 'none'; base-uri 'self'; form-action 'none'";
+
+const csp = (): Plugin => ({
+  name: "inject-csp",
+  apply: "build",
+  transformIndexHtml: (html) =>
+    html.replace("<head>", `<head>\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />`),
+});
 
 export default defineConfig({
-  tanstackStart: {
-    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-    // nitro/vite builds from this
-    server: { entry: "server" },
-  },
+  base: "./",
+  server: { host: "::", port: 8080 },
+  resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  plugins: [
+    react(),
+    tailwindcss(),
+    csp(),
+    VitePWA({
+      registerType: "autoUpdate",
+      injectRegister: null,
+      devOptions: { enabled: false },
+      filename: "sw.js",
+      manifest: false,
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,png,ico,webmanifest}"],
+        navigateFallbackDenylist: [/^\/~oauth/],
+        runtimeCaching: [
+          { urlPattern: ({ request }) => request.mode === "navigate", handler: "NetworkFirst" },
+        ],
+      },
+    }),
+  ],
 });

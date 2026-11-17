@@ -37,5 +37,15 @@ bun run test
 bun run build    # dist/
 ```
 
+## Android APK (aláírt, telepíthető)
+Az APK-t a GitHub Actions építi (`.github/workflows/android.yml`), a webes app Capacitorral van becsomagolva. Az aláíró kulcsot a workflow az első futáskor egyszer létrehozza.
+
+1. **Egyszeri előkészítés:** a repóban *Settings → Secrets and variables → Actions → New repository secret*. Név: `ANDROID_KEYSTORE_PASSWORD`, érték: egy hosszú (20+ karakteres), véletlenszerű jelszó. **Mentsd el jelszókezelőbe**: a GitHub nem mutatja meg újra, és elvesztésekor a kulcs használhatatlan lesz (az új APK-t csak a régi app törlése után lehet telepíteni).
+2. *Actions → Android APK → Run workflow.* Az első futás létrehozza a kulcsot, titkosítva a `signing` ágra menti, és utána minden futás ugyanezt használja. (A kulcs egy külön ágon van, hogy a ZIP-es „Teljes csere” a `main` ágon ne törölhesse.)
+3. Kész: *Releases* → `RepoPush.apk`. Állandó link a legfrissebbhez: `https://github.com/<felhasználó>/<repó>/releases/latest/download/RepoPush.apk`.
+4. Telefonon nyisd meg a letöltött APK-t, és engedélyezd az ismeretlen forrásból telepítést. Az új verziók a régire települnek, az adatok (token) megmaradnak.
+
+Az appon belüli „▶ Friss build indítása” gomb az Android workflow-t is elindítja (minden `workflow_dispatch` workflow-t indít).
+
 ## GitHub Pages
 A `.github/workflows/deploy.yml` minden `main` push után lefuttatja a teszteket, megépíti az appot, és kiteszi GitHub Pagesre. A repóban: **Settings → Pages → Source: GitHub Actions**. A relatív elérési út miatt bármilyen `/<repo>/` alatt fut.

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { GitHub, planZip, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, clearToken } from "@/lib/token";
+import { isNative } from "@/lib/native";
 import { TokenScreen } from "@/TokenScreen";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
@@ -117,7 +118,12 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     add(`  Futás oldala: ${x.url}`);
   }
 
-  function saveLog() {
+  async function saveLog() {
+    // Blob downloads do not work inside the Android WebView, so copy the log instead.
+    if (isNative()) {
+      try { await navigator.clipboard.writeText(log.join("\n")); add("A napló a vágólapra másolva."); } catch { add("A vágólapra másolás nem sikerült."); }
+      return;
+    }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([log.join("\n")], { type: "text/plain" }));
     a.download = "repopush-naplo.txt";
@@ -283,7 +289,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               <button disabled={building} onClick={build} className="flex-1 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
                 {building ? "Build fut…" : runs.length ? "Új build" : "▶ Friss build indítása"}
               </button>
-              <button onClick={saveLog} className="rounded border border-border px-2 py-1.5">⇩ Napló</button>
+              <button onClick={saveLog} className="rounded border border-border px-2 py-1.5">{isNative() ? "⧉ Napló" : "⇩ Napló"}</button>
             </div>
             {runs.map((x) => (
               <div key={x.id} className="space-y-0.5">

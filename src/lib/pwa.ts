@@ -1,6 +1,9 @@
-// Single service-worker registrar. Never registers in dev or inside iframes (?sw=off also disables it).
+import { isNative } from "./native";
+
+// Single service-worker registrar. Never registers in dev, inside iframes or in the APK (?sw=off also disables it).
 function refused(): boolean {
   if (!import.meta.env.PROD) return true;
+  if (isNative()) return true;
   if (window.self !== window.top) return true;
   if (new URLSearchParams(location.search).get("sw") === "off") return true;
   return false;

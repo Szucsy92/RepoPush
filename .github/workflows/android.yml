@@ -1,0 +1,137 @@
+name: Android APK
+
+# Kézzel indítható: Actions → Android APK → Run workflow.
+# Az első futáskor létrehoz egy aláíró kulcsot (egyszer), titkosítva a `signing` ágra menti,
+# a későbbi futások ugyanezt használják, így az APK-k egymásra frissíthetők.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KS_ALIAS: repopush
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Aláíró kulcs (első futáskor létrejön, utána újrahasznosul)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KS_PASS:-}" ]; then
+            echo "::error::Hiányzik az ANDROID_KEYSTORE_PASSWORD secret. Repo → Settings → Secrets and variables → Actions → New repository secret (legalább 20 karakter)."
+            exit 1
+          fi
+          if [ "${#KS_PASS}" -lt 12 ]; then
+            echo "::error::Az ANDROID_KEYSTORE_PASSWORD túl rövid (legalább 12, ajánlott 20+ karakter)."
+            exit 1
+          fi
+          KS="$RUNNER_TEMP/release.keystore"
+          ENC="$RUNNER_TEMP/release.keystore.enc"
+          if git ls-remote --exit-code --heads origin signing >/dev/null 2>&1; then
+            git fetch --depth=1 origin signing
+            git show FETCH_HEAD:release.keystore.enc > "$ENC"
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:KS_PASS -in "$ENC" -out "$KS" \
+              || { echo "::error::A kulcs nem fejthető vissza. Ugyanaz a jelszó van a secretben, mint a generáláskor?"; exit 1; }
+            echo "Meglévő aláíró kulcs használva."
+          else
+            keytool -genkeypair -keystore "$KS" -storetype PKCS12 -alias "$KS_ALIAS" \
+              -keyalg RSA -keysize 2048 -validity 36500 \
+              -storepass:env KS_PASS -keypass:env KS_PASS \
+              -dname "CN=RepoPush, O=Szucsy92, C=HU"
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:KS_PASS -in "$KS" -out "$ENC"
+            d="$(mktemp -d)"
+            cp "$ENC" "$d/release.keystore.enc"
+            cd "$d"
+            git init -q -b signing
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git add release.keystore.enc
+            git commit -q -m "Android signing key (encrypted, generated once)"
+            git push -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" signing
+            echo "Új aláíró kulcs létrehozva, titkosítva a 'signing' ágra mentve."
+          fi
+          echo "KS_FILE=$KS" >> "$GITHUB_ENV"
+
+      - run: bun install
+      - run: bun run test
+      - run: bun run build
+
+      - name: Android projekt előkészítése
+        run: |
+          set -euo pipefail
+          N="${{ github.run_number }}"
+          ./node_modules/.bin/cap add android
+
+          # Az app tokent tárol: ne kerüljön Google-biztonsági mentésbe.
+          sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
+
+          # Növekvő verziószám, hogy az új APK az előzőre telepíthető legyen.
+          G=android/app/build.gradle
+          sed -i -E "s/versionCode [0-9]+/versionCode $N/; s/versionName \"[^\"]*\"/versionName \"1.0.$N\"/" "$G"
+          grep -q "versionCode $N" "$G" || { echo "::error::A versionCode nem írható át ($G)"; exit 1; }
+
+          # Ikon a public/icons/icon-512.png-ből.
+          command -v convert >/dev/null || sudo apt-get install -y -qq imagemagick
+          SRC=public/icons/icon-512.png
+          RES=android/app/src/main/res
+          declare -A LEG=( [mdpi]=48 [hdpi]=72 [xhdpi]=96 [xxhdpi]=144 [xxxhdpi]=192 )
+          declare -A FG=( [mdpi]=108 [hdpi]=162 [xhdpi]=216 [xxhdpi]=324 [xxxhdpi]=432 )
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            s=${LEG[$d]}; f=${FG[$d]}; i=$((f*66/100))
+            for n in ic_launcher ic_launcher_round; do
+              if [ -f "$RES/mipmap-$d/$n.png" ]; then convert "$SRC" -resize "${s}x${s}" "$RES/mipmap-$d/$n.png"; fi
+            done
+            if [ -f "$RES/mipmap-$d/ic_launcher_foreground.png" ]; then
+              convert "$SRC" -resize "${i}x${i}" -background none -gravity center -extent "${f}x${f}" "$RES/mipmap-$d/ic_launcher_foreground.png"
+            fi
+          done
+          if [ -f "$RES/values/ic_launcher_background.xml" ]; then
+            sed -i -E 's/#[0-9A-Fa-f]{6}/#0b0f14/' "$RES/values/ic_launcher_background.xml"
+          fi
+
+      - name: APK építése
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Zipalign és aláírás
+        run: |
+          set -euo pipefail
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          U="$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)"
+          test -n "$U" || { echo "::error::Nem készült APK"; exit 1; }
+          "$BT/zipalign" -p -f 4 "$U" aligned.apk
+          "$BT/apksigner" sign --ks "$KS_FILE" --ks-pass env:KS_PASS --key-pass env:KS_PASS \
+            --ks-key-alias "$KS_ALIAS" --out RepoPush.apk aligned.apk
+          "$BT/apksigner" verify --print-certs RepoPush.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RepoPush-apk
+          path: RepoPush.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: RepoPush 1.0.${{ github.run_number }}
+          body: Telepíthető, aláírt Android APK. Letöltés után nyisd meg a telefonon (ismeretlen forrásból telepítés engedélyezése kellhet).
+          files: RepoPush.apk

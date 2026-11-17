@@ -78,29 +78,35 @@ export function getUnlockMode(): UnlockMode {
 }
 export const setUnlockMode = (m: UnlockMode) => localStorage.setItem(MODE, m);
 
-export async function biometricAvailable(): Promise<boolean> {
-  if (!isNative()) return false;
-  try { return (await (await bio()).isAvailable()).isAvailable; } catch { return false; }
-}
+/** The Android app is the only place biometrics exist. The device's own answer comes when it is used, with the real error text. */
+export const biometricSupported = (): boolean => isNative();
 
-export async function enableBiometric(pin: string): Promise<boolean> {
+const errText = (e: unknown): string => {
+  const x = e as { message?: string; code?: string | number } | string | undefined;
+  if (typeof x === "string") return x;
+  return [x?.message, x?.code].filter((v) => v !== undefined && v !== "").join(" · ") || "ismeretlen hiba";
+};
+
+export type BioResult = { ok: true } | { ok: false; reason: string };
+
+export async function enableBiometric(pin: string): Promise<BioResult> {
   try {
     const b = await bio();
     await b.verifyIdentity({ reason: "Biometrikus feloldás bekapcsolása", title: "RepoPush" });
     await b.setCredentials({ username: "pin", password: pin, server: BIO_SERVER });
     localStorage.setItem(BIO, "1");
     setUnlockMode("bio");
-    return true;
-  } catch { return false; }
+    return { ok: true };
+  } catch (e) { return { ok: false, reason: errText(e) }; }
 }
 
-/** Asks for the fingerprint/face and returns the stored PIN, or null when cancelled or failed. */
-export async function unlockWithBiometric(): Promise<string | null> {
+/** Asks for the fingerprint/face and returns the stored PIN, or the reason it did not work (cancelled, plugin missing…). */
+export async function unlockWithBiometric(): Promise<{ pin: string } | { reason: string }> {
   try {
     const b = await bio();
     await b.verifyIdentity({ reason: "Feloldás", title: "RepoPush" });
-    return (await b.getCredentials({ server: BIO_SERVER })).password;
-  } catch { return null; }
+    return { pin: (await b.getCredentials({ server: BIO_SERVER })).password };
+  } catch (e) { return { reason: errText(e) }; }
 }
 
 /** Removes the vault, the wrong-PIN counter and the biometric secret. */

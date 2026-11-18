@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Download, RefreshCw } from "lucide-react";
+import { ChevronDown, Download, RefreshCw, X } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
@@ -458,18 +458,33 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </>
         ) : (
           <>
-            <div className="flex shrink-0 gap-1 font-mono text-xs">
-              <button type="button" onClick={() => patchFile.current?.click()} className="flex-1 rounded-xl border border-border px-2 py-2">Fájl kiválasztása</button>
-              <button type="button" disabled={!patch} onClick={() => setPatch("")} className="rounded-xl border border-border px-3 py-2 disabled:opacity-40">Törlés</button>
+            {/* Same window as the ZIP one (size, dashed frame); a round frosted button clears it. */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={async (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
+              className={`relative flex min-h-[6.5rem] flex-[2] overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
+            >
+              <textarea
+                value={patch}
+                onChange={(e) => setPatch(e.target.value)}
+                aria-label="Diff / patch"
+                spellCheck={false}
+                className={`min-w-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs outline-none ${patch ? "pb-14" : ""}`}
+              />
+              {!patch && (
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
+                  <button type="button" onClick={() => patchFile.current?.click()} className="pointer-events-auto max-w-full truncate font-mono text-sm">Diff behúzása / tallózás</button>
+                  <div className="text-xs text-muted-foreground">vagy érints ide, és illeszd be</div>
+                </div>
+              )}
+              {patch && (
+                <button type="button" onClick={() => setPatch("")} title="Törlés" aria-label="Törlés" className="absolute bottom-2.5 right-2.5 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
+                  <X className="h-5 w-5" />
+                </button>
+              )}
               <input ref={patchFile} type="file" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setPatch(await f.text()); }} />
             </div>
-            <textarea
-              value={patch}
-              onChange={(e) => setPatch(e.target.value)}
-              placeholder="Diff / patch beillesztése vagy .patch fájl behúzása"
-              onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
-              className="field min-h-[8rem] flex-[2] resize-none font-mono text-xs"
-            />
             {targets.length > 0 && (
               <div className="truncate font-mono text-xs text-muted-foreground">
                 {targets.length} fájl: {targets.map((t) => t.newPath ?? t.oldPath).join(", ")}

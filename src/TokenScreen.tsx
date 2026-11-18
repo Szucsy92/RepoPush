@@ -19,7 +19,7 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
   }
 
   return (
-    <main className="flex min-h-[100dvh] flex-col bg-background p-4 text-foreground">
+    <main className="flex min-h-[100dvh] flex-col p-4 text-foreground">
       <div className="mx-auto w-full max-w-md space-y-3">
         <div className="text-lg"><Brand /></div>
         <h1 className="text-base font-bold">Token megadása</h1>
@@ -42,7 +42,7 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
         {err && <div className="rounded border border-destructive p-2 text-xs text-destructive">{err}</div>}
         {me ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 rounded border border-border p-2 font-mono text-sm">
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-card p-2 font-mono text-sm">
               <img src={me.avatar} alt="" className="h-8 w-8 rounded-full" /> {me.login}
             </div>
             <button onClick={() => { saveToken(token.trim(), remember); onDone(token.trim(), me, remember); }} className="w-full rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground">

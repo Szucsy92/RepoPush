@@ -116,6 +116,7 @@ jobs:
             @Override
             public void onCreate(Bundle savedInstanceState) {
               registerPlugin(BiometricVaultPlugin.class);
+              registerPlugin(PressHapticsPlugin.class);
               super.onCreate(savedInstanceState);
               View root = findViewById(android.R.id.content);
               root.setBackgroundColor(0xFF0B0F14);
@@ -131,6 +132,7 @@ jobs:
 
           # Biometrikus tár: a repóban lévő natív Capacitor plugin (Keystore + ujjlenyomat) másolása a projektbe.
           sed "s/__PKG__/$PKG/" native/BiometricVaultPlugin.java > "$(dirname "$MA")/BiometricVaultPlugin.java"
+          sed "s/__PKG__/$PKG/" native/PressHapticsPlugin.java > "$(dirname "$MA")/PressHapticsPlugin.java"
           printf '\ndependencies {\n    implementation "androidx.biometric:biometric:1.1.0"\n}\n' >> android/app/build.gradle
 
           # Az app tokent tárol: ne kerüljön Google-biztonsági mentésbe.
@@ -138,6 +140,8 @@ jobs:
 
           # Biometrikus feloldás (ujjlenyomat/arc) a PIN mellett.
           grep -q USE_BIOMETRIC android/app/src/main/AndroidManifest.xml || sed -i 's#<application#<uses-permission android:name="android.permission.USE_BIOMETRIC" />\n    <application#' android/app/src/main/AndroidManifest.xml
+          # Rezgés a gombnyomásra (haptic).
+          grep -q android.permission.VIBRATE android/app/src/main/AndroidManifest.xml || sed -i 's#<application#<uses-permission android:name="android.permission.VIBRATE" />\n    <application#' android/app/src/main/AndroidManifest.xml
 
           # Növekvő verziószám, hogy az új APK az előzőre telepíthető legyen.
           G=android/app/build.gradle

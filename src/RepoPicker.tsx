@@ -37,47 +37,47 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
 
   const row = (r: Repo, isPinned: boolean, idx: number, count: number) => {
     const selected = r.full_name === value;
-    const icon = "flex h-8 w-7 shrink-0 items-center justify-center rounded text-muted-foreground active:bg-secondary disabled:opacity-25";
+    const icon = "flex h-12 w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground disabled:opacity-25";
     return (
-      <li key={r.full_name} role="presentation" className={`flex items-center ${selected ? "bg-accent" : ""}`}>
-        <button type="button" role="option" aria-selected={selected} title={r.full_name} onClick={() => pick(r.full_name)} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left font-mono text-xs active:bg-secondary">
-          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">{selected && <Check className="h-3.5 w-3.5 text-primary" />}</span>
+      <li key={r.full_name} role="presentation" className={`flex items-center border-b border-border/40 last:border-b-0 ${selected ? "bg-accent" : ""}`}>
+        <button type="button" role="option" aria-selected={selected} title={r.full_name} onClick={() => pick(r.full_name)} className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-3 text-left font-mono text-base">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center">{selected && <Check className="h-5 w-5 text-primary" />}</span>
           <span className="min-w-0 flex-1 truncate">{short(r.full_name)}</span>
-          {r.private && <Lock className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="privát" />}
+          {r.private && <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="privát" />}
         </button>
         {isPinned && !needle && (
           <>
-            <button type="button" disabled={idx === 0} onClick={() => update(movePin(pins, (n) => byName.has(n), r.full_name, -1))} aria-label="Feljebb" className={icon}><ArrowUp className="h-3.5 w-3.5" /></button>
-            <button type="button" disabled={idx === count - 1} onClick={() => update(movePin(pins, (n) => byName.has(n), r.full_name, 1))} aria-label="Lejjebb" className={icon}><ArrowDown className="h-3.5 w-3.5" /></button>
+            <button type="button" disabled={idx === 0} onClick={() => update(movePin(pins, (n) => byName.has(n), r.full_name, -1))} aria-label="Feljebb" className={icon}><ArrowUp className="h-4 w-4" /></button>
+            <button type="button" disabled={idx === count - 1} onClick={() => update(movePin(pins, (n) => byName.has(n), r.full_name, 1))} aria-label="Lejjebb" className={icon}><ArrowDown className="h-4 w-4" /></button>
           </>
         )}
-        <button type="button" onClick={() => update(togglePin(pins, r.full_name))} aria-label={isPinned ? "Rögzítés feloldása" : "Rögzítés felülre"} aria-pressed={isPinned} className={`${icon} mr-0.5 ${isPinned ? "text-primary!" : ""}`}>
-          <Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-current" : ""}`} />
+        <button type="button" onClick={() => update(togglePin(pins, r.full_name))} aria-label={isPinned ? "Rögzítés feloldása" : "Rögzítés felülre"} aria-pressed={isPinned} className={`${icon} mr-1 ${isPinned ? "text-primary!" : ""}`}>
+          <Pin className={`h-5 w-5 ${isPinned ? "fill-current" : ""}`} />
         </button>
       </li>
     );
   };
 
-  const head = "sticky top-0 z-[1] flex items-center gap-1 bg-background px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground";
+  const head = "sticky top-0 z-[1] flex items-center gap-1.5 bg-background/95 px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground";
   return (
     <div ref={root} className="relative min-w-0 flex-[2]">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open} title={value || "Repó kiválasztása"} className={`field flex w-full items-center gap-1.5 text-left font-mono text-xs ${open ? "border-primary!" : ""}`}>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open} title={value || "Repó kiválasztása"} className={`field picker flex w-full items-center gap-1.5 text-left font-mono text-xs ${value ? "picker-set" : "picker-idle"}`}>
         {cur?.private && <Lock className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="privát" />}
         <span className={`min-w-0 flex-1 truncate ${value ? "" : "text-muted-foreground"}`}>{value ? short(value) : repos.length ? "Repó kiválasztása" : "Betöltés…"}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${value ? "text-primary" : "text-muted-foreground"} ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-md border border-border bg-background shadow-lg">
+        <div className="absolute left-0 top-full z-30 mt-2 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
           {repos.length > 8 && (
-            <div className="flex items-center gap-1.5 border-b border-border px-2 py-1">
-              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Keresés…" aria-label="Repó keresése" className="min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground" />
+            <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Keresés…" aria-label="Repó keresése" className="min-w-0 flex-1 bg-transparent font-mono text-base outline-none placeholder:text-muted-foreground" />
             </div>
           )}
-          <div ref={list} role="listbox" aria-label="Repók" className="max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain">
+          <div ref={list} role="listbox" aria-label="Repók" className="max-h-[min(66vh,30rem)] overflow-y-auto overscroll-contain">
             {pinnedShown.length > 0 && (
               <>
-                <div className={head}><Pin className="h-2.5 w-2.5" aria-hidden="true" />Rögzítettek</div>
+                <div className={head}><Pin className="h-3 w-3" aria-hidden="true" />Rögzítettek</div>
                 <ul>{pinnedShown.map((r, i) => row(r, true, i, pinnedShown.length))}</ul>
               </>
             )}
@@ -87,7 +87,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
                 <ul>{restShown.map((r) => row(r, false, 0, 0))}</ul>
               </>
             )}
-            {!pinnedShown.length && !restShown.length && <div className="px-2 py-3 text-center font-mono text-xs text-muted-foreground">{repos.length ? "Nincs találat" : "Betöltés…"}</div>}
+            {!pinnedShown.length && !restShown.length && <div className="px-3 py-4 text-center font-mono text-base text-muted-foreground">{repos.length ? "Nincs találat" : "Betöltés…"}</div>}
           </div>
         </div>
       )}

@@ -9,8 +9,8 @@ export function ConfirmDialog({ plan, repo, branch, mode, onOk, onCancel }: {
     </details>
   );
   return (
-    <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-      <div className="w-full max-w-sm space-y-2 rounded-lg border border-border bg-card p-4">
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm space-y-2 rounded-2xl border border-border bg-popover p-4 shadow-2xl">
         <h2 className="font-bold">Biztosan végrehajtod?</h2>
         <div className="font-mono text-xs">{repo} @ <b>{branch}</b> · {mode}</div>
         <div className="grid grid-cols-3 gap-1 text-center font-mono text-xs">
@@ -25,7 +25,7 @@ export function ConfirmDialog({ plan, repo, branch, mode, onOk, onCancel }: {
         <div className="text-xs text-muted-foreground">Az ág kényszerített frissítése felülírja az ág jelenlegi állapotát.</div>
         <div className="flex gap-2">
           <button onClick={onCancel} className="flex-1 rounded-md border border-border px-3 py-2 text-sm">Mégse</button>
-          <button onClick={onOk} className="flex-1 rounded-md bg-destructive px-3 py-2 text-sm font-bold text-destructive-foreground">Végrehajtás</button>
+          <button onClick={onOk} data-haptic="medium" className="flex-1 rounded-md bg-destructive px-3 py-2 text-sm font-bold text-destructive-foreground">Végrehajtás</button>
         </div>
       </div>
     </div>

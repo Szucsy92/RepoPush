@@ -390,8 +390,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     <>
     {confirm && <ConfirmDialog plan={confirm.plan} repo={repo} branch={branch} mode={tab === "patch" ? "patch" : mode === "replace" ? "teljes csere" : "beillesztés"}
       onOk={() => { confirm.resolve(true); setConfirm(null); }} onCancel={() => { confirm.resolve(false); setConfirm(null); }} />}
-    <main className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex items-center justify-between border-b border-border px-3 py-2">
+    <main className="flex h-[100dvh] flex-col overflow-hidden text-foreground">
+      <header className="flex items-center justify-between border-b border-border bg-card px-3 py-2">
         <Brand />
         <div className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
           {me ? <><img src={me.avatar} alt="" className="h-5 w-5 rounded-full" />{me.login}</> : "kapcsolódás…"}
@@ -415,7 +415,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           <datalist id="branches">{branches.map((b) => <option key={b} value={b} />)}</datalist>
         </div>
 
-        <div className="flex gap-1 rounded-md border border-border p-0.5 font-mono text-xs">
+        <div className="flex gap-1 rounded-md border border-border bg-card p-0.5 font-mono text-xs">
           {(["zip", "patch"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded px-2 py-1.5 ${tab === t ? "bg-secondary text-secondary-foreground" : "text-muted-foreground"}`}>
               {t === "zip" ? "ZIP" : "Patch / Diff"}
@@ -429,13 +429,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
               onDrop={(e) => { e.preventDefault(); setDrag(false); onZip(e.dataTransfer.files[0]); }}
-              className={`flex h-20 shrink-0 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border"}`}
+              className={`flex h-20 shrink-0 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
             >
               <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => onZip(e.target.files?.[0])} />
               <div className="truncate font-mono text-sm">{zipName || "ZIP behúzása / tallózás"}</div>
               <div className="text-xs text-muted-foreground">{zipFiles.length ? `${zipFiles.length} fájl` : "letöltött repó szerkezet"}</div>
             </label>
-            <div className="flex gap-1 rounded-md border border-border p-0.5 font-mono text-xs">
+            <div className="flex gap-1 rounded-md border border-border bg-card p-0.5 font-mono text-xs">
               <button onClick={() => setMode("replace")} title="Ami nincs a ZIP-ben, törlődik" className={`flex-1 rounded px-2 py-1.5 ${mode === "replace" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Teljes csere</button>
               <button onClick={() => setMode("merge")} title="A többi fájl marad" className={`flex-1 rounded px-2 py-1.5 ${mode === "merge" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Beillesztés</button>
             </div>
@@ -463,11 +463,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         )}
 
         <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit üzenet (opcionális)" className="field text-xs" />
-        <button disabled={busy || !repo} onClick={run} className="truncate rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
+        <button disabled={busy || !repo} onClick={run} data-haptic="medium" className="truncate rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
         </button>
         {/* One bar: the fill is the progress from Start to Finish, the label names only the current stage. */}
-        <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="relative h-7 shrink-0 overflow-hidden rounded-md border border-border bg-muted font-mono text-[11px]">
+        <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="relative h-7 shrink-0 overflow-hidden rounded-md border border-border bg-card font-mono text-[11px]">
           <div className={`absolute inset-y-0 left-0 transition-all ${stage === -1 ? "bg-destructive/50" : "bg-primary/50"}`} style={{ width: `${pct}%` }} />
           <div className="relative flex h-full items-center gap-1.5 px-2">
             <span className={`shrink-0 font-bold ${stage === -1 ? "text-destructive" : stage === 1 || stage === 2 ? "animate-pulse" : ""}`}>{stage === -1 ? "Hiba" : stage === 1 ? "Start" : stage === 2 ? "Process" : stage === 3 ? "Finish" : "Várakozás"}</span>
@@ -476,7 +476,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </div>
         </div>
         {release && release.id !== seenId && !active.length && !building && (
-          <div className="shrink-0 space-y-1 rounded-md border border-border p-1.5 font-mono text-[11px]">
+          <div className="shrink-0 space-y-1 rounded-md border border-border bg-card p-1.5 font-mono text-[11px]">
             <div className="flex items-center gap-1">
               <div className="flex-1 truncate text-muted-foreground">Utolsó APK elérhető: {release.name} · {stamp(release.published)}</div>
               <button onClick={() => { markSeen(repo, release.id); setSeenId(release.id); }} className="rounded border border-border px-1.5 py-0.5">elrejt</button>
@@ -512,7 +512,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${ddOpen ? "rotate-180" : ""}`} />
               </button>
               {ddOpen && (
-                <div style={{ maxHeight: ddMax }} className="absolute left-1 right-1 top-full z-10 mt-0.5 space-y-1 overflow-auto rounded border border-border bg-background p-1.5 shadow-lg">
+                <div style={{ maxHeight: ddMax }} className="absolute left-1 right-1 top-full z-10 mt-0.5 space-y-1 overflow-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl">
                   {runs.map((x) => (
                     <div key={x.id} className="space-y-0.5">
                       <div className="flex items-center gap-1">
@@ -535,7 +535,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 </div>
               )}
             </div>
-            <button disabled={building} onClick={build} title="Friss build indítása" className="shrink-0 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
+            <button disabled={building} onClick={build} data-haptic="medium" title="Friss build indítása" className="shrink-0 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
               {building ? "Fut…" : runs.length ? "Új build" : "▶ Build"}
             </button>
             <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} aria-label={isNative() ? "Napló másolása" : "Napló mentése"} className="shrink-0 rounded border border-border px-2 py-1.5">{isNative() ? "⧉" : "⇩"}</button>

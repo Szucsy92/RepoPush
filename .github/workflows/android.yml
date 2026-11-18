@@ -97,19 +97,23 @@ jobs:
           N="${{ github.run_number }}"
           ./node_modules/.bin/cap add android
 
-          # Az app ne rajzolódjon az állapotsor/navigációs sáv alá (Android 15+ edge-to-edge):
-          # a tartalmat a rendszersávok alá toljuk, így a fejléc (kijelentkezés) elérhető marad.
+          # Az app a rendszersávok (állapotsor, navigációs sáv) mögé is rajzol, azok átlátszók. A sávok magasságát
+          # a SystemInsets plugin adja át a weboldalnak (CSS változók), így a fejléc ugyanott marad.
           MA="$(find android/app/src/main/java -name MainActivity.java | head -1)"
           test -n "$MA" || { echo "::error::MainActivity.java nem található"; exit 1; }
           PKG="$(grep -m1 -oP '^package \K[^;]+' "$MA")"
           cat > "$MA" <<JAVA
           package $PKG;
 
+          import android.graphics.Color;
+          import android.os.Build;
           import android.os.Bundle;
           import android.view.View;
           import androidx.core.graphics.Insets;
           import androidx.core.view.ViewCompat;
+          import androidx.core.view.WindowCompat;
           import androidx.core.view.WindowInsetsCompat;
+          import androidx.core.view.WindowInsetsControllerCompat;
           import com.getcapacitor.BridgeActivity;
 
           public class MainActivity extends BridgeActivity {
@@ -117,12 +121,20 @@ jobs:
             public void onCreate(Bundle savedInstanceState) {
               registerPlugin(BiometricVaultPlugin.class);
               registerPlugin(PressHapticsPlugin.class);
+              registerPlugin(SystemInsetsPlugin.class);
               super.onCreate(savedInstanceState);
+              WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+              getWindow().setStatusBarColor(Color.TRANSPARENT);
+              getWindow().setNavigationBarColor(Color.TRANSPARENT);
+              if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
+              WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+              bars.setAppearanceLightStatusBars(false);
+              bars.setAppearanceLightNavigationBars(false);
               View root = findViewById(android.R.id.content);
               root.setBackgroundColor(0xFF0B0F14);
               ViewCompat.setOnApplyWindowInsetsListener(root, (v, w) -> {
-                Insets i = w.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
-                v.setPadding(i.left, i.top, i.right, i.bottom);
+                Insets ime = w.getInsets(WindowInsetsCompat.Type.ime());
+                v.setPadding(0, 0, 0, ime.bottom);
                 return WindowInsetsCompat.CONSUMED;
               });
             }
@@ -133,6 +145,7 @@ jobs:
           # Biometrikus tár: a repóban lévő natív Capacitor plugin (Keystore + ujjlenyomat) másolása a projektbe.
           sed "s/__PKG__/$PKG/" native/BiometricVaultPlugin.java > "$(dirname "$MA")/BiometricVaultPlugin.java"
           sed "s/__PKG__/$PKG/" native/PressHapticsPlugin.java > "$(dirname "$MA")/PressHapticsPlugin.java"
+          sed "s/__PKG__/$PKG/" native/SystemInsetsPlugin.java > "$(dirname "$MA")/SystemInsetsPlugin.java"
           printf '\ndependencies {\n    implementation "androidx.biometric:biometric:1.1.0"\n}\n' >> android/app/build.gradle
 
           # Az app tokent tárol: ne kerüljön Google-biztonsági mentésbe.

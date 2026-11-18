@@ -68,6 +68,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
 
   // Build status strip: one line with the current step; tapping it drops down the full run list.
   // Any tap outside the strip/dropdown folds it back.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const out = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
+    document.addEventListener("pointerdown", out);
+    return () => document.removeEventListener("pointerdown", out);
+  }, [menuOpen]);
   const [ddOpen, setDdOpen] = useState(false);
   const [ddMax, setDdMax] = useState(240);
   const ddRef = useRef<HTMLDivElement>(null);
@@ -390,24 +398,32 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     <>
     {confirm && <ConfirmDialog plan={confirm.plan} repo={repo} branch={branch} mode={tab === "patch" ? "patch" : mode === "replace" ? "teljes csere" : "beillesztés"}
       onOk={() => { confirm.resolve(true); setConfirm(null); }} onCancel={() => { confirm.resolve(false); setConfirm(null); }} />}
-    <main className="flex h-[100dvh] flex-col overflow-hidden text-foreground">
-      <header className="flex items-center justify-between border-b border-border bg-card px-3 py-2">
+    <main className="app-insets flex h-[100dvh] flex-col overflow-hidden text-foreground">
+      <header className="flex items-center justify-between px-3 py-[5px]">
         <Brand />
-        <div className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-          {me ? <><img src={me.avatar} alt="" className="h-5 w-5 rounded-full" />{me.login}</> : "kapcsolódás…"}
-          <button onClick={() => { if (window.confirm("Kijelentkezel és törlöd a tokent erről az eszközről?")) onLogout(); }} className="ml-1 rounded border border-border px-1.5 py-0.5">Kijelentkezés</button>
+        <div ref={menuRef} className="relative">
+          <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-haspopup="menu" aria-expanded={menuOpen} className="flex h-8 items-center gap-1.5 rounded-full bg-card py-1 pl-1 pr-2.5 font-mono text-xs text-muted-foreground">
+            {me ? <><img src={me.avatar} alt="" className="h-6 w-6 rounded-full" /><span className="text-foreground">{me.login}</span></> : <span className="pl-1.5">Bejelentkezés…</span>}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+          </button>
+          {menuOpen && (
+            <div role="menu" className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-2xl border border-border bg-popover p-1.5 shadow-2xl">
+              {me && <div className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">Bejelentkezve: {me.login}</div>}
+              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); if (window.confirm("Kijelentkezel és törlöd a tokent erről az eszközről?")) onLogout(); }} className="w-full rounded-xl px-3 py-2.5 text-left font-mono text-sm text-destructive">Kijelentkezés</button>
+            </div>
+          )}
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 p-3">
+      <div className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 px-3 pb-3 pt-1">
         <div className="flex gap-2">
           <RepoPicker repos={repos} value={repo} onChange={setRepo} />
           {repoZip ? (
-            <a href={repoZip} target="_blank" rel="noopener noreferrer" title={`Teljes repó letöltése (ZIP) · ${branch}`} aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-md border border-border bg-card">
+            <a href={repoZip} target="_blank" rel="noopener noreferrer" title={`Teljes repó letöltése (ZIP) · ${branch}`} aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card">
               <Download className="h-4 w-4" />
             </a>
           ) : (
-            <button type="button" disabled title="Válassz repót" aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-md border border-border bg-card opacity-40">
+            <button type="button" disabled title="Válassz repót" aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card opacity-40">
               <Download className="h-4 w-4" />
             </button>
           )}
@@ -415,9 +431,9 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           <datalist id="branches">{branches.map((b) => <option key={b} value={b} />)}</datalist>
         </div>
 
-        <div className="flex gap-1 rounded-md border border-border bg-card p-0.5 font-mono text-xs">
+        <div className="flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
           {(["zip", "patch"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded px-2 py-1.5 ${tab === t ? "bg-secondary text-secondary-foreground" : "text-muted-foreground"}`}>
+            <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded-xl px-2 py-2 font-semibold ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
               {t === "zip" ? "ZIP" : "Patch / Diff"}
             </button>
           ))}
@@ -429,22 +445,22 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
               onDrop={(e) => { e.preventDefault(); setDrag(false); onZip(e.dataTransfer.files[0]); }}
-              className={`flex h-20 shrink-0 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
+              className={`flex min-h-[6.5rem] flex-[2] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
             >
               <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => onZip(e.target.files?.[0])} />
               <div className="truncate font-mono text-sm">{zipName || "ZIP behúzása / tallózás"}</div>
               <div className="text-xs text-muted-foreground">{zipFiles.length ? `${zipFiles.length} fájl` : "letöltött repó szerkezet"}</div>
             </label>
-            <div className="flex gap-1 rounded-md border border-border bg-card p-0.5 font-mono text-xs">
-              <button onClick={() => setMode("replace")} title="Ami nincs a ZIP-ben, törlődik" className={`flex-1 rounded px-2 py-1.5 ${mode === "replace" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Teljes csere</button>
-              <button onClick={() => setMode("merge")} title="A többi fájl marad" className={`flex-1 rounded px-2 py-1.5 ${mode === "merge" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Beillesztés</button>
+            <div className="flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
+              <button onClick={() => setMode("replace")} title="Ami nincs a ZIP-ben, törlődik" className={`flex-1 rounded-xl px-2 py-2 font-semibold ${mode === "replace" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Teljes csere</button>
+              <button onClick={() => setMode("merge")} title="A többi fájl marad" className={`flex-1 rounded-xl px-2 py-2 font-semibold ${mode === "merge" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Beillesztés</button>
             </div>
           </>
         ) : (
           <>
             <div className="flex shrink-0 gap-1 font-mono text-xs">
-              <button type="button" onClick={() => patchFile.current?.click()} className="flex-1 rounded-md border border-border px-2 py-1.5">Fájl kiválasztása</button>
-              <button type="button" disabled={!patch} onClick={() => setPatch("")} className="rounded-md border border-border px-3 py-1.5 disabled:opacity-40">Törlés</button>
+              <button type="button" onClick={() => patchFile.current?.click()} className="flex-1 rounded-xl border border-border px-2 py-2">Fájl kiválasztása</button>
+              <button type="button" disabled={!patch} onClick={() => setPatch("")} className="rounded-xl border border-border px-3 py-2 disabled:opacity-40">Törlés</button>
               <input ref={patchFile} type="file" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setPatch(await f.text()); }} />
             </div>
             <textarea
@@ -452,7 +468,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               onChange={(e) => setPatch(e.target.value)}
               placeholder="Diff / patch beillesztése vagy .patch fájl behúzása"
               onDrop={async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
-              className="field h-28 shrink-0 resize-none font-mono text-xs"
+              className="field min-h-[8rem] flex-[2] resize-none font-mono text-xs"
             />
             {targets.length > 0 && (
               <div className="truncate font-mono text-xs text-muted-foreground">
@@ -463,20 +479,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         )}
 
         <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit üzenet (opcionális)" className="field text-xs" />
-        <button disabled={busy || !repo} onClick={run} data-haptic="medium" className="truncate rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
+        <button disabled={busy || !repo} onClick={run} data-haptic="medium" className="truncate rounded-xl bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
         </button>
-        {/* One bar: the fill is the progress from Start to Finish, the label names only the current stage. */}
-        <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="relative h-7 shrink-0 overflow-hidden rounded-md border border-border bg-card font-mono text-[11px]">
-          <div className={`absolute inset-y-0 left-0 transition-all ${stage === -1 ? "bg-destructive/50" : "bg-primary/50"}`} style={{ width: `${pct}%` }} />
-          <div className="relative flex h-full items-center gap-1.5 px-2">
-            <span className={`shrink-0 font-bold ${stage === -1 ? "text-destructive" : stage === 1 || stage === 2 ? "animate-pulse" : ""}`}>{stage === -1 ? "Hiba" : stage === 1 ? "Start" : stage === 2 ? "Process" : stage === 3 ? "Finish" : "Várakozás"}</span>
-            <span className="min-w-0 flex-1 truncate">{stage === 0 ? "" : step}</span>
-            {stage !== 0 && <span className="shrink-0">{pct}%</span>}
-          </div>
-        </div>
         {release && release.id !== seenId && !active.length && !building && (
-          <div className="shrink-0 space-y-1 rounded-md border border-border bg-card p-1.5 font-mono text-[11px]">
+          <div className="shrink-0 space-y-1 rounded-xl border border-border bg-card p-1.5 font-mono text-[11px]">
             <div className="flex items-center gap-1">
               <div className="flex-1 truncate text-muted-foreground">Utolsó APK elérhető: {release.name} · {stamp(release.published)}</div>
               <button onClick={() => { markSeen(repo, release.id); setSeenId(release.id); }} className="rounded border border-border px-1.5 py-0.5">elrejt</button>
@@ -488,7 +495,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             ))}
           </div>
         )}
-        <div ref={cardRef} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
+        <div ref={cardRef} className="flex min-h-[9rem] flex-[5] flex-col overflow-hidden rounded-xl border border-border bg-card">
         {repo && (
           <div className="flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
             <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
@@ -503,6 +510,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             </button>
           </div>
         )}
+        {/* Progress is part of the log window: the stage and step as one line, with a thin bar from Start to Finish. */}
+        <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="relative flex shrink-0 items-center gap-1.5 px-3 pb-1.5 pt-1 font-mono text-[11px]">
+          <span className={`shrink-0 font-bold ${stage === -1 ? "text-destructive" : stage === 1 || stage === 2 ? "animate-pulse" : ""}`}>{stage === -1 ? "Hiba" : stage === 1 ? "Start" : stage === 2 ? "Process" : stage === 3 ? "Finish" : "Várakozás"}</span>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{stage === 0 ? "" : step}</span>
+          {stage !== 0 && <span className="shrink-0">{pct}%</span>}
+          <div className="absolute inset-x-0 bottom-0 h-0.5 bg-border/40"><div className={`h-full transition-all ${stage === -1 ? "bg-destructive" : "bg-primary"}`} style={{ width: `${pct}%` }} /></div>
+        </div>
         {stage === 3 && (
           <div ref={stripRef} className="relative flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
             <div ref={ddRef} className="min-w-0 flex-1">

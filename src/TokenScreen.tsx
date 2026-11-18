@@ -19,7 +19,7 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
   }
 
   return (
-    <main className="flex min-h-[100dvh] flex-col p-4 text-foreground">
+    <main className="flex min-h-[100dvh] flex-col pad-inset text-foreground">
       <div className="mx-auto w-full max-w-md space-y-3">
         <div className="text-lg"><Brand /></div>
         <h1 className="text-base font-bold">Token megadása</h1>

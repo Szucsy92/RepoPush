@@ -177,7 +177,7 @@
 }
 .field {
   width: 100%;
-  border-radius: var(--radius);
+  border-radius: calc(var(--radius) + 4px);
   border: 1px solid var(--border);
   background: var(--card);
   padding: 0.6rem 0.75rem;
@@ -240,4 +240,10 @@ button:not(:disabled):active, a[href]:active, label[class*="cursor-pointer"]:act
 @media (prefers-reduced-motion: reduce) {
   .picker-idle { animation: none; box-shadow: 0 0 6px 0 color-mix(in oklab, var(--primary) 26%, transparent); }
   button, a[href], [role="button"], label[class*="cursor-pointer"] { transition: none; }
+}
+
+/* ---- Space for the transparent status / navigation bars (values come from the native SystemInsets plugin) ---- */
+.app-insets { padding: var(--inset-top, 0px) var(--inset-right, 0px) var(--inset-bottom, 0px) var(--inset-left, 0px); }
+.pad-inset {
+  padding: calc(1rem + var(--inset-top, 0px)) calc(1rem + var(--inset-right, 0px)) calc(1rem + var(--inset-bottom, 0px)) calc(1rem + var(--inset-left, 0px));
 }

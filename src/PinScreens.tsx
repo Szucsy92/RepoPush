@@ -6,7 +6,7 @@ import { Brand } from "@/Brand";
 
 function Shell({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <main className="flex min-h-[100dvh] flex-col p-4 text-foreground">
+    <main className="flex min-h-[100dvh] flex-col pad-inset text-foreground">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center space-y-4">
         <div className="text-lg"><Brand /></div>
         <h1 className="text-base font-bold">{title}</h1>

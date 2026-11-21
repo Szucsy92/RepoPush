@@ -33,6 +33,10 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [since, setSince] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
   const [building, setBuilding] = useState(false);
+  const [stopping, setStopping] = useState(false); // leállítás kérve, a futás még nem zárult le
+  const [forceReady, setForceReady] = useState(false); // ha a leállítás nem hat, kényszeríthető
+  const cancelWanted = useRef(false); // a build még nem jelent meg: amint megjelenik, leállítjuk
+  const forceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [stage, setStage] = useState<0 | 1 | 2 | 3 | -1>(0);
   const [pct, setPct] = useState(0);
   const [step, setStep] = useState("");
@@ -127,6 +131,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   }, [repo]);
 
   useEffect(() => { buildingRef.current = building; }, [building]);
+  useEffect(() => {
+    if (building) return;
+    setStopping(false); setForceReady(false); cancelWanted.current = false;
+    if (forceTimer.current) clearTimeout(forceTimer.current);
+  }, [building]);
   useEffect(() => { setSeenId(repo ? seenRelease(repo) : undefined); }, [repo, release]);
 
   // Az építés-panelben már követett futások azonosítói: ezeket a figyelő nem jelzi külön.
@@ -255,6 +264,10 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         fails = 0;
         setRuns(r);
         logPhases(r);
+        if (cancelWanted.current) {
+          const open = r.filter((x) => x.status !== "completed");
+          if (open.length) { cancelWanted.current = false; void cancelOpen(open, false); }
+        }
         const done = r.length > 0 && r.every((x) => x.status === "completed");
         if (done) { setBuilding(false); add(`BUILD KÉSZ: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); setRelTick((n) => n + 1); return; }
         // Ne ragadjon be: ha 2 percig nem indult futás, vagy 45 percnél tovább tart, feladjuk a várakozást.
@@ -305,6 +318,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
 
   async function build() {
     setBuilding(true); setRuns([]); phases.current = {}; setLogTab("log");
+    setStopping(false); setForceReady(false); cancelWanted.current = false;
     const t = new Date(Date.now() - 5000).toISOString().replace(/\.\d+Z$/, "Z");
     try {
       const r = await gh.startBuild(repo, branch);
@@ -312,6 +326,41 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
       if (r.skipped.length) add(`  (kihagyva, nincs workflow_dispatch: ${r.skipped.join(", ")})`);
       setSince(""); setTimeout(() => setSince(t), 3000);
     } catch (e: any) { add(`Build hiba: ${e.message}`); setBuilding(false); }
+  }
+
+  async function cancelOpen(rs: Run[], force: boolean) {
+    const stopped = await Promise.all(rs.map(async (x) => {
+      try { await gh.cancelRun(repo, x.id, force); return x.name; }
+      catch (e: any) {
+        if (e?.status === 409) return null; // közben lezárult
+        add(`Leállítás hiba (${x.name}): ${e.message}`);
+        return null;
+      }
+    }));
+    const ok = stopped.filter(Boolean);
+    if (ok.length) add(`${force ? "KÉNYSZERÍTETT LEÁLLÍTÁS" : "LEÁLLÍTÁS"} kérve: ${ok.join(", ")}`);
+  }
+
+  // Ugyanaz a gomb: Build → futás közben Mégse / Leállítás → ha nem hat, Kényszerítés.
+  async function stopBuild() {
+    const force = stopping && forceReady;
+    if (stopping && !forceReady) return;
+    const open = runs.filter((x) => x.status !== "completed");
+    if (!open.length) {
+      // Még nem jelent meg a futás a GitHubon: amint megjelenik, leállítjuk.
+      cancelWanted.current = true;
+      setStopping(true);
+      add("MÉGSE: a build leáll, amint megjelenik a GitHubon.");
+      return;
+    }
+    const names = open.map((x) => x.name).join(", ");
+    const q = force ? `A leállítás nem hatott. Kényszeríted a leállítást? (${names})` : `Leállítod a futó buildet? (${names})`;
+    if (!window.confirm(q)) return;
+    setStopping(true); setForceReady(false);
+    if (forceTimer.current) clearTimeout(forceTimer.current);
+    forceTimer.current = setTimeout(() => setForceReady(true), 15000);
+    await cancelOpen(open, force);
+    setPollTick((n) => n + 1); // az új állapot azonnal látszik
   }
 
   // The full log ZIP is a plain github.com link: the browser's own GitHub session does the download
@@ -412,6 +461,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   }
 
   const sum = buildSummary(runs, building);
+  const openRuns = runs.filter((x) => x.status !== "completed");
 
   return (
     <>
@@ -584,8 +634,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 </div>
               )}
             </div>
-            <button disabled={building} onClick={build} data-haptic="medium" title="Friss build indítása" className="shrink-0 rounded bg-primary px-2 py-1.5 font-bold text-primary-foreground disabled:opacity-50">
-              {building ? "Fut…" : runs.length ? "Új build" : "▶ Build"}
+            <button
+              disabled={building && stopping && !forceReady}
+              onClick={building ? stopBuild : build}
+              data-haptic="medium"
+              title={building ? (stopping && forceReady ? "Kényszerített leállítás (force-cancel)" : "A futó build leállítása") : "Friss build indítása"}
+              className={`shrink-0 rounded px-2 py-1.5 font-bold disabled:opacity-60 ${building ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground"}`}
+            >
+              {!building ? (runs.length ? "Új build" : "▶ Build") : !stopping ? (openRuns.length ? "■ Leállítás" : "Mégse") : forceReady ? "Kényszerítés" : "Leállítás…"}
             </button>
             <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} aria-label={isNative() ? "Napló másolása" : "Napló mentése"} className="shrink-0 rounded border border-border px-2 py-1.5">{isNative() ? "⧉" : "⇩"}</button>
           </div>

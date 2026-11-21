@@ -219,6 +219,14 @@ export class GitHub {
     }));
   }
 
+  /**
+   * Futó workflow-futás leállítása. A kényszerített változat az elakadt („cancelling” állapotban ragadt) futásokhoz kell.
+   * Ha a futás közben lezárult, a GitHub 409-et ad (GitHubError.status).
+   */
+  async cancelRun(repo: string, id: number, force = false): Promise<void> {
+    await this.raw(`repos/${repo}/actions/runs/${id}/${force ? "force-cancel" : "cancel"}`, { method: "POST" });
+  }
+
   /** A listában látszó állapot elavulhat („szellem” queued futás): a nyitottnak látszó futásokat a saját végpontjukon ellenőrizzük. */
   private async verifyOpen(repo: string, runs: any[]): Promise<any[]> {
     return Promise.all(runs.map((x) => (x.status === "completed" ? x : this.req<any>(`repos/${repo}/actions/runs/${x.id}`).catch(() => x))));

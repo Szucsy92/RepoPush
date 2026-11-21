@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronDown, Download, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
@@ -10,6 +10,7 @@ import { TokenScreen } from "@/TokenScreen";
 import { PinSetup, LockScreen } from "@/PinScreens";
 import { RepoPicker } from "@/RepoPicker";
 import { DiffEditor } from "@/DiffEditor";
+import { openRect, readInsets, type Rect } from "@/lib/expand";
 import { Brand } from "@/Brand";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
@@ -71,7 +72,21 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [activeErr, setActiveErr] = useState("");
   const [drag, setDrag] = useState(false);
   const [expanded, setExpanded] = useState(false); // a diff ablak kinyitva: a képernyő tetejétől a feléig ér
-  useEffect(() => { if (tab !== "patch") setExpanded(false); }, [tab]);
+  const [panel, setPanel] = useState<CSSProperties | null>(null); // a diff ablak rögzített téglalapja, amíg nyitva van vagy mozog
+  const [big, setBig] = useState(false);
+  const slotRef = useRef<HTMLDivElement>(null);
+  const closing = useRef(false);
+  useEffect(() => { if (tab !== "patch") { setExpanded(false); setPanel(null); setBig(false); closing.current = false; } }, [tab]);
+  useEffect(() => {
+    if (!panel || !expanded) return;
+    // Forgatás / billentyűzet: a nyitott ablak követi a képernyő méretét.
+    const onResize = () => {
+      const slot = slotRef.current; if (!slot) return;
+      setPanel({ position: "fixed", ...openTarget(slot.getBoundingClientRect()), transition: "none" });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [expanded, !!panel]);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
   // Build status strip: one line with the current step; tapping it drops down the full run list.
@@ -348,6 +363,32 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     } catch (e: any) { add(`Build hiba: ${e.message}`); setBuilding(false); }
   }
 
+  // A diff ablak harmonika-szerűen nyílik: a helyéről egyszerre felfelé és lefelé növekszik a célméretig, becsukáskor ugyanígy, visszafelé.
+  const MOVE = "top .26s ease, left .26s ease, width .26s ease, height .26s ease, background-color .26s ease";
+  const moveCss = () => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "none" : MOVE);
+  const rectCss = (r: Rect): CSSProperties => ({ top: r.top, left: r.left, width: r.width, height: r.height });
+  function openTarget(from: Rect): Rect {
+    return openRect({ width: window.innerWidth, height: window.innerHeight }, readInsets(), matchMedia("(orientation: landscape) and (max-height: 34rem)").matches, from);
+  }
+  function openPatch() {
+    const slot = slotRef.current; if (!slot) return;
+    closing.current = false;
+    const from = slot.getBoundingClientRect();
+    setExpanded(true); setBig(false);
+    setPanel({ position: "fixed", ...rectCss(from), transition: "none" }); // ugyanott, ahol volt: a hely a elrendezésben marad
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      setBig(true);
+      setPanel({ position: "fixed", ...rectCss(openTarget(from)), transition: moveCss() });
+    }));
+  }
+  function closePatch() {
+    const slot = slotRef.current; if (!slot) return;
+    closing.current = true;
+    setExpanded(false); setBig(false);
+    setPanel({ position: "fixed", ...rectCss(slot.getBoundingClientRect()), transition: moveCss() });
+    setTimeout(() => { if (closing.current) { closing.current = false; setPanel(null); } }, 320); // a mozgás végén vissza a helyére
+  }
+
   async function cancelOpen(rs: Run[], force: boolean) {
     const stopped = await Promise.all(rs.map(async (x) => {
       try { await gh.cancelRun(repo, x.id, force); return x.name; }
@@ -563,12 +604,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           <>
             {/* Same window as the ZIP one (size, dashed frame). The slot keeps its place in the layout; the window itself fills it,
                 or, expanded like an accordion, opens from the top of the screen down to its middle. Two round frosted buttons: expand and clear. */}
-            <div className="win relative min-h-[6.5rem] flex-[2]">
+            <div ref={slotRef} className="win relative min-h-[6.5rem] flex-[2]">
               <div
+                style={panel ?? undefined}
                 onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
                 onDragLeave={() => setDrag(false)}
                 onDrop={async (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
-                className={`${expanded ? "win-open bg-popover" : "absolute inset-0 bg-card"} flex overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border"}`}
+                className={`${panel ? `fixed z-40 shadow-2xl ${big ? "bg-popover" : "bg-card"}` : "absolute inset-0 bg-card"} flex overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border"}`}
               >
                 <DiffEditor value={patch} onChange={setPatch} padBottom />
                 {!patch && (
@@ -578,7 +620,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                   </div>
                 )}
                 <div className="absolute bottom-2.5 right-2.5 flex gap-2">
-                  <button type="button" onClick={() => setExpanded((x) => !x)} title={expanded ? "Összecsukás" : "Kinyitás"} aria-label={expanded ? "Összecsukás" : "Kinyitás"} aria-expanded={expanded} className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
+                  <button type="button" onClick={() => (expanded ? closePatch() : openPatch())} title={expanded ? "Összecsukás" : "Kinyitás"} aria-label={expanded ? "Összecsukás" : "Kinyitás"} aria-expanded={expanded} className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
                     {expanded ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
                   </button>
                   {patch && (

@@ -300,23 +300,3 @@ button:not(:disabled):active, a[href]:active, label[class*="cursor-pointer"]:act
   .land-shell > * { margin: 0; }
   .pad-keys button { padding-block: 0.3rem; }
 }
-
-/* ---- Expanded diff window: opens like an accordion from the top of the screen down to its middle (landscape: nearly the full height) ---- */
-.win-open {
-  position: fixed;
-  z-index: 40;
-  top: calc(var(--inset-top, 0px) + 0.25rem);
-  bottom: 50dvh;
-  left: calc(var(--inset-left, 0px) + 0.75rem);
-  right: calc(var(--inset-right, 0px) + 0.75rem);
-  max-width: 42rem;
-  margin-inline: auto;
-  transform-origin: top;
-  animation: win-open 0.22s ease-out;
-  box-shadow: 0 18px 40px -12px rgb(0 0 0 / 0.6);
-}
-@keyframes win-open { from { opacity: 0.4; transform: scaleY(0.55); } to { opacity: 1; transform: none; } }
-@media (orientation: landscape) and (max-height: 34rem) {
-  .win-open { bottom: calc(var(--inset-bottom, 0px) + 0.5rem); }
-}
-@media (prefers-reduced-motion: reduce) { .win-open { animation: none; } }

@@ -418,9 +418,9 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     {confirm && <ConfirmDialog plan={confirm.plan} repo={repo} branch={branch} mode={tab === "patch" ? "patch" : mode === "replace" ? "teljes csere" : "beillesztés"}
       onOk={() => { confirm.resolve(true); setConfirm(null); }} onCancel={() => { confirm.resolve(false); setConfirm(null); }} />}
     <main className="app-insets flex h-[100dvh] flex-col overflow-hidden text-foreground">
-      <header className="flex items-center justify-between px-3 py-[5px]">
-        <Brand />
-        <div ref={menuRef} className="relative">
+      <header className="flex flex-wrap items-center justify-between gap-y-1.5 px-3 py-[5px]">
+        <Brand className="hdr-brand" />
+        <div ref={menuRef} className="hdr-profile relative">
           <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-haspopup="menu" aria-expanded={menuOpen} className="flex h-8 items-center gap-1.5 rounded-full bg-card py-1 pl-1 pr-2.5 font-mono text-xs text-muted-foreground">
             {me ? <><img src={me.avatar} alt="" className="h-6 w-6 rounded-full" /><span className="text-foreground">{me.login}</span></> : <span className="pl-1.5">Bejelentkezés…</span>}
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen ? "rotate-180" : ""}`} aria-hidden="true" />
@@ -432,11 +432,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             </div>
           )}
         </div>
-      </header>
-
-      <div className="land-grid mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 px-3 pb-3 pt-1">
-        <div className="land-col">
-        <div className="flex gap-2">
+        <div className="hdr-row flex gap-2">
           <RepoPicker repos={repos} value={repo} onChange={setRepo} />
           {repoZip ? (
             <a href={repoZip} target="_blank" rel="noopener noreferrer" title={`Teljes repó letöltése (ZIP) · ${branch}`} aria-label="Teljes repó letöltése ZIP-ben" className="flex w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card">
@@ -450,8 +446,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           <input list="branches" value={branch} onChange={(e) => setBranch(e.target.value)} className="field min-w-0 flex-1 font-mono text-xs" placeholder="ág" />
           <datalist id="branches">{branches.map((b) => <option key={b} value={b} />)}</datalist>
         </div>
+      </header>
 
-        <div className="flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
+      <div className="land-grid mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 px-3 pb-3 pt-1">
+        <div className="land-col">
+        <div className="seg flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
           {(["zip", "patch"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded-xl px-2 py-2 font-semibold ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
               {t === "zip" ? "ZIP" : "Patch / Diff"}
@@ -476,7 +475,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 </button>
               )}
             </label>
-            <div className="flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
+            <div className="seg flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
               <button onClick={() => setMode("replace")} title="Ami nincs a ZIP-ben, törlődik" className={`flex-1 rounded-xl px-2 py-2 font-semibold ${mode === "replace" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Teljes csere</button>
               <button onClick={() => setMode("merge")} title="A többi fájl marad" className={`flex-1 rounded-xl px-2 py-2 font-semibold ${mode === "merge" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Beillesztés</button>
             </div>
@@ -513,7 +512,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         )}
 
         <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit üzenet (opcionális)" className="field text-xs" />
-        <button disabled={busy || !repo} onClick={run} data-haptic="medium" className="truncate rounded-xl bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
+        <button disabled={busy || !repo} onClick={run} data-haptic="medium" className="act truncate rounded-xl bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
         </button>
         </div>

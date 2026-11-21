@@ -36,3 +36,19 @@ export function classifyDiff(text: string): DiffLine[] {
     return { kind: FILE.test(line) ? "file" : "text", text: line };
   });
 }
+
+/**
+ * The character range of lines a..b (0-based, in any order), including the line break after the last one,
+ * so cutting or deleting the selection removes the whole lines. Offsets refer to the text exactly as given
+ * (pass the textarea's own value, which always uses \n).
+ */
+export function lineSelection(text: string, a: number, b: number = a): [number, number] {
+  const lines = text.split("\n");
+  const first = Math.max(0, Math.min(a, b, lines.length - 1));
+  const last = Math.min(lines.length - 1, Math.max(a, b));
+  let start = 0;
+  for (let i = 0; i < first; i++) start += lines[i]!.length + 1;
+  let end = start;
+  for (let i = first; i <= last; i++) end += lines[i]!.length + 1;
+  return [start, Math.min(end, text.length)];
+}

@@ -76,13 +76,25 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [big, setBig] = useState(false);
   const slotRef = useRef<HTMLDivElement>(null);
   const closing = useRef(false);
+  const openW = useRef(0); // képernyőszélesség nyitáskor: csak forgatáskor számolunk újra
+  const openGoal = useRef<Rect | null>(null); // a nyitott ablak célméretete
   useEffect(() => { if (tab !== "patch") { setExpanded(false); setPanel(null); setBig(false); closing.current = false; } }, [tab]);
   useEffect(() => {
     if (!panel || !expanded) return;
-    // Forgatás / billentyűzet: a nyitott ablak követi a képernyő méretét.
+    // Forgatás: új célméret. Billentyűzet (csak a magasság változik): az ablak marad ott és akkora, ahol és amekkora volt,
+    // legfeljebb a látható területre szorul, ha a billentyűzet nagyon sokat takar, és visszanő, amikor eltűnik.
     const onResize = () => {
       const slot = slotRef.current; if (!slot) return;
-      setPanel({ position: "fixed", ...openTarget(slot.getBoundingClientRect()), transition: "none" });
+      if (window.innerWidth !== openW.current) {
+        openW.current = window.innerWidth;
+        const goal = openTarget(slot.getBoundingClientRect());
+        openGoal.current = goal;
+        setPanel({ position: "fixed", ...rectCss(goal), transition: "none" });
+        return;
+      }
+      const goal = openGoal.current; if (!goal) return;
+      const height = Math.max(120, Math.min(goal.height, window.innerHeight - 4 - goal.top));
+      setPanel((p) => (p && Number(p.height) !== height ? { ...p, height, transition: "none" } : p));
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -374,11 +386,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const slot = slotRef.current; if (!slot) return;
     closing.current = false;
     const from = slot.getBoundingClientRect();
+    const goal = openTarget(from);
+    openW.current = window.innerWidth;
+    openGoal.current = goal;
     setExpanded(true); setBig(false);
     setPanel({ position: "fixed", ...rectCss(from), transition: "none" }); // ugyanott, ahol volt: a hely a elrendezésben marad
     requestAnimationFrame(() => requestAnimationFrame(() => {
       setBig(true);
-      setPanel({ position: "fixed", ...rectCss(openTarget(from)), transition: moveCss() });
+      setPanel({ position: "fixed", ...rectCss(goal), transition: moveCss() });
     }));
   }
   function closePatch() {
@@ -612,7 +627,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 onDrop={async (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
                 className={`${panel ? `fixed z-40 shadow-2xl ${big ? "bg-popover" : "bg-card"}` : "absolute inset-0 bg-card"} flex overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border"}`}
               >
-                <DiffEditor value={patch} onChange={setPatch} padBottom />
+                <DiffEditor value={patch} onChange={setPatch} />
                 {!patch && (
                   <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
                     <button type="button" onClick={() => patchFile.current?.click()} className="pointer-events-auto max-w-full truncate font-mono text-sm">Diff behúzása / tallózás</button>

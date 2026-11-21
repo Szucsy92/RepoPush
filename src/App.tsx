@@ -136,6 +136,24 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     setStopping(false); setForceReady(false); cancelWanted.current = false;
     if (forceTimer.current) clearTimeout(forceTimer.current);
   }, [building]);
+
+  // Leállítás kérve egy-egy futásra (az Action fülről vagy a build sáv listájából): futásonként követjük, mikor kérték.
+  const [stopReq, setStopReq] = useState<Record<number, number>>({});
+  const [, setStopTick] = useState(0);
+  useEffect(() => {
+    // Ami már nem fut, annak a jelzése is megszűnik.
+    const open = new Set([...active.map((x) => x.id), ...runs.filter((x) => x.status !== "completed").map((x) => x.id)]);
+    setStopReq((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => open.has(+id)));
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [active, runs]);
+  const anyStopReq = Object.keys(stopReq).length > 0;
+  useEffect(() => {
+    if (!anyStopReq) return;
+    const id = setInterval(() => setStopTick((n) => n + 1), 3000); // 15 mp után megjelenik a Kényszerítés
+    return () => clearInterval(id);
+  }, [anyStopReq]);
   useEffect(() => { setSeenId(repo ? seenRelease(repo) : undefined); }, [repo, release]);
 
   // Az építés-panelben már követett futások azonosítói: ezeket a figyelő nem jelzi külön.
@@ -361,6 +379,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     forceTimer.current = setTimeout(() => setForceReady(true), 15000);
     await cancelOpen(open, force);
     setPollTick((n) => n + 1); // az új állapot azonnal látszik
+  }
+
+  // Bármelyik futó action leállítható, akkor is, ha nem a Build gombbal indult (push, másik gép, GitHub-oldal).
+  async function stopActive(r: Run, force = false) {
+    const q = force ? `A leállítás nem hatott. Kényszeríted a leállítást? (${r.name})` : `Leállítod a futó action-t? (${r.name}, ${r.event})`;
+    if (!window.confirm(q)) return;
+    setStopReq((p) => ({ ...p, [r.id]: Date.now() }));
+    await cancelOpen([r], force);
+    void pokeRef.current?.(); // az új állapot azonnal látszik
   }
 
   // The full log ZIP is a plain github.com link: the browser's own GitHub session does the download
@@ -620,6 +647,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                         <span className="text-muted-foreground">{x.conclusion ?? x.status}</span>
                         {x.status === "completed" && <a href={logZip(x)} target="_blank" rel="noreferrer" className={`rounded border px-1.5 ${x.conclusion === "failure" ? "border-destructive text-destructive" : "border-border"}`}>⇩ log ZIP</a>}
                         {x.status === "completed" && <button onClick={() => { details(x); setDdOpen(false); }} className="rounded border border-border px-1.5">részletek</button>}
+                        {x.status !== "completed" && <button onClick={() => stopActive(x, !!stopReq[x.id] && Date.now() - stopReq[x.id]! > 15000)} disabled={!!stopReq[x.id] && Date.now() - stopReq[x.id]! <= 15000} className="rounded border border-destructive/60 px-1.5 text-destructive disabled:opacity-60">{stopReq[x.id] ? (Date.now() - stopReq[x.id]! > 15000 ? "kényszerít" : "leáll…") : "■ leállít"}</button>}
                       </div>
                       {x.jobs.map((j) => (
                         <div key={j.name} className="pl-3 text-muted-foreground">
@@ -644,6 +672,27 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               {!building ? (runs.length ? "Új build" : "▶ Build") : !stopping ? (openRuns.length ? "■ Leállítás" : "Mégse") : forceReady ? "Kényszerítés" : "Leállítás…"}
             </button>
             <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} aria-label={isNative() ? "Napló másolása" : "Napló mentése"} className="shrink-0 rounded border border-border px-2 py-1.5">{isNative() ? "⧉" : "⇩"}</button>
+          </div>
+        )}
+        {logTab === "action" && active.length > 0 && (
+          <div className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-border px-2 py-1.5 font-mono text-[11px]">
+            {active.map((r) => {
+              const at = stopReq[r.id];
+              const force = !!at && Date.now() - at > 15000;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  disabled={!!at && !force}
+                  onClick={() => stopActive(r, force)}
+                  data-haptic="medium"
+                  title={force ? "Kényszerített leállítás (force-cancel)" : `Leállítás: ${r.name} (${r.event})`}
+                  className="max-w-[16rem] shrink-0 truncate rounded-full border border-destructive/60 px-3 py-1 text-destructive disabled:opacity-60"
+                >
+                  {at ? (force ? `Kényszerítés · ${r.name}` : "Leállítás…") : `■ Leállítás · ${r.name}`}
+                </button>
+              );
+            })}
           </div>
         )}
         {logTab === "action" && active.length > 0 ? (

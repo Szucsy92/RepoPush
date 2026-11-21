@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Download, RefreshCw, X } from "lucide-react";
+import { ChevronDown, Download, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
@@ -70,6 +70,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [activeAt, setActiveAt] = useState("");
   const [activeErr, setActiveErr] = useState("");
   const [drag, setDrag] = useState(false);
+  const [expanded, setExpanded] = useState(false); // a diff ablak kinyitva: a képernyő tetejétől a feléig ér
+  useEffect(() => { if (tab !== "patch") setExpanded(false); }, [tab]);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
   // Build status strip: one line with the current step; tapping it drops down the full run list.
@@ -559,26 +561,34 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </>
         ) : (
           <>
-            {/* Same window as the ZIP one (size, dashed frame); a round frosted button clears it. */}
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-              onDragLeave={() => setDrag(false)}
-              onDrop={async (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
-              className={`win relative flex min-h-[6.5rem] flex-[2] overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
-            >
-              <DiffEditor value={patch} onChange={setPatch} padBottom={!!patch} />
-              {!patch && (
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
-                  <button type="button" onClick={() => patchFile.current?.click()} className="pointer-events-auto max-w-full truncate font-mono text-sm">Diff behúzása / tallózás</button>
-                  <div className="text-xs text-muted-foreground">vagy érints ide, és illeszd be</div>
+            {/* Same window as the ZIP one (size, dashed frame). The slot keeps its place in the layout; the window itself fills it,
+                or, expanded like an accordion, opens from the top of the screen down to its middle. Two round frosted buttons: expand and clear. */}
+            <div className="win relative min-h-[6.5rem] flex-[2]">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+                onDragLeave={() => setDrag(false)}
+                onDrop={async (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
+                className={`${expanded ? "win-open bg-popover" : "absolute inset-0 bg-card"} flex overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border"}`}
+              >
+                <DiffEditor value={patch} onChange={setPatch} padBottom />
+                {!patch && (
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
+                    <button type="button" onClick={() => patchFile.current?.click()} className="pointer-events-auto max-w-full truncate font-mono text-sm">Diff behúzása / tallózás</button>
+                    <div className="text-xs text-muted-foreground">vagy érints ide, és illeszd be</div>
+                  </div>
+                )}
+                <div className="absolute bottom-2.5 right-2.5 flex gap-2">
+                  <button type="button" onClick={() => setExpanded((x) => !x)} title={expanded ? "Összecsukás" : "Kinyitás"} aria-label={expanded ? "Összecsukás" : "Kinyitás"} aria-expanded={expanded} className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
+                    {expanded ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+                  </button>
+                  {patch && (
+                    <button type="button" onClick={() => setPatch("")} title="Törlés" aria-label="Törlés" className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
+                      <X className="h-5 w-5" />
+                    </button>
+                  )}
                 </div>
-              )}
-              {patch && (
-                <button type="button" onClick={() => setPatch("")} title="Törlés" aria-label="Törlés" className="absolute bottom-2.5 right-2.5 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
-                  <X className="h-5 w-5" />
-                </button>
-              )}
-              <input ref={patchFile} type="file" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setPatch(await f.text()); }} />
+                <input ref={patchFile} type="file" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setPatch(await f.text()); }} />
+              </div>
             </div>
             {targets.length > 0 && (
               <div className="truncate font-mono text-xs text-muted-foreground">

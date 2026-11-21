@@ -4,6 +4,8 @@ export const API = "https://api.github.com";
 export type ReleaseAsset = { name: string; url: string; size: number };
 export type LatestRelease = { id: string; tag: string; name: string; published: string; assets: ReleaseAsset[] };
 
+const REQUEST_TIMEOUT_MS = 25_000;
+
 export class GitHubError extends Error {
   constructor(message: string, public status: number) {
     super(message);
@@ -61,17 +63,29 @@ export class GitHub {
     const url = new URL(path.replace(/^\//, ""), API + "/");
     if (url.origin !== API) throw new Error("Csak az api.github.com hívható.");
     // A GitHub API válaszai 60 mp-ig gyorsítótárazhatók: ettől maradt „beragadva” a régi állapot. Mindig friss kell.
-    const res = await this.fetchImpl(url.href, {
-      cache: "no-store",
-      ...init,
-      headers: {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        Authorization: `Bearer ${this.token}`,
-        ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...(init.headers ?? {}),
-      },
-    });
+    // Lekérdezésekre (nincs törzs) időkorlát: egy elakadt kérés ne fagyassza be a követést és a frissítést.
+    const ctl = !init.signal && !init.body ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS) : undefined;
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url.href, {
+        cache: "no-store",
+        ...(ctl ? { signal: ctl.signal } : {}),
+        ...init,
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          Authorization: `Bearer ${this.token}`,
+          ...(init.body ? { "Content-Type": "application/json" } : {}),
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (e) {
+      if (ctl?.signal.aborted) throw new GitHubError("Időtúllépés: a GitHub nem válaszolt időben, próbáld újra.", 0);
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     const lim = res.headers.get("x-ratelimit-limit");
     if (lim) this.rate = { limit: +lim, remaining: +(res.headers.get("x-ratelimit-remaining") ?? 0), reset: +(res.headers.get("x-ratelimit-reset") ?? 0) };
     if (!res.ok) throw new GitHubError(friendlyError(res.status, await res.text(), res.headers), res.status);
@@ -205,9 +219,14 @@ export class GitHub {
     }));
   }
 
+  /** A listában látszó állapot elavulhat („szellem” queued futás): a nyitottnak látszó futásokat a saját végpontjukon ellenőrizzük. */
+  private async verifyOpen(repo: string, runs: any[]): Promise<any[]> {
+    return Promise.all(runs.map((x) => (x.status === "completed" ? x : this.req<any>(`repos/${repo}/actions/runs/${x.id}`).catch(() => x))));
+  }
+
   async buildStatus(repo: string, branch: string, since: string): Promise<Run[]> {
     const r = await this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&created=${encodeURIComponent(">=" + since)}&per_page=20`);
-    return this.withJobs(repo, r.workflow_runs);
+    return this.withJobs(repo, await this.verifyOpen(repo, r.workflow_runs));
   }
 
   /**

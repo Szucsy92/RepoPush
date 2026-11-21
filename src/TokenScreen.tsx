@@ -20,7 +20,8 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
 
   return (
     <main className="flex min-h-[100dvh] flex-col pad-inset text-foreground">
-      <div className="mx-auto w-full max-w-md space-y-3">
+      <div className="land-shell mx-auto w-full max-w-md space-y-3">
+        <div className="space-y-3">
         <div className="text-lg"><Brand /></div>
         <h1 className="text-base font-bold">Token megadása</h1>
         <ol className="list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
@@ -30,6 +31,8 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
           <li>Klasszikus token esetén a <b>repo</b> és <b>workflow</b> jogot pipáld be.</li>
           <li>Másold be ide. A token csak ezen az eszközön marad, és csak a GitHubnak küldjük.</li>
         </ol>
+        </div>
+        <div className="space-y-3">
         <input
           type="password" autoComplete="off" spellCheck={false} value={token}
           onChange={(e) => { setToken(e.target.value); setMe(null); }}
@@ -54,6 +57,7 @@ export function TokenScreen({ onDone }: { onDone: (token: string, me: { login: s
             {busy ? "Ellenőrzés…" : "Token ellenőrzése"}
           </button>
         )}
+        </div>
       </div>
     </main>
   );

@@ -9,6 +9,7 @@ import { markSeen, seenRelease } from "@/lib/seen";
 import { TokenScreen } from "@/TokenScreen";
 import { PinSetup, LockScreen } from "@/PinScreens";
 import { RepoPicker } from "@/RepoPicker";
+import { DiffEditor } from "@/DiffEditor";
 import { Brand } from "@/Brand";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
@@ -63,6 +64,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState("");
   const [activeAt, setActiveAt] = useState("");
+  const [activeErr, setActiveErr] = useState("");
   const [drag, setDrag] = useState(false);
   const add = (s: string) => setLog((l) => [...l, `${new Date().toLocaleTimeString()}  ${s}`]);
 
@@ -143,6 +145,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const seenDone = new Set<number>(); // lezárult futások, amikről már tudunk
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inflight: Promise<void> | null = null;
+    let errs = 0;
     const body = async () => {
       let delay = 15000;
       if (document.visibilityState === "visible") {
@@ -178,8 +181,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           activeRef.current = mine;
           setActive(mine);
           setActiveAt(new Date().toLocaleTimeString());
+          errs = 0;
+          setActiveErr("");
           if (mine.length) delay = 8000;
-        } catch { /* hálózati hiba: a következő körben újra */ }
+        } catch (e: any) {
+          // Ne maradjon csendben elavult állapot: a hiba látszik az Action fülön, és ritkábban próbálkozunk.
+          errs++;
+          setActiveErr(e?.message ?? String(e));
+          delay = errs > 2 ? 30000 : 15000;
+        }
       }
       if (alive) timer = setTimeout(tick, delay);
     };
@@ -207,6 +217,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
 
   const targets = useMemo(() => (tab === "patch" && patch.trim() ? safe(() => patchTargets(patch), []) : []), [patch, tab]);
 
+  function clearZip() { setZipFiles([]); setZipName(""); }
+
   async function onZip(f: File | undefined) {
     if (!f) return;
     if (f.name.match(/\.(patch|diff)$/i)) {
@@ -232,11 +244,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const t0 = Date.now();
+    let fails = 0;
+    let running = false;
     const tick = async () => {
-      if (stop) return;
+      if (stop || running) return;
+      running = true;
       try {
         const r = await gh.buildStatus(repo, branch, since);
         if (stop) return;
+        fails = 0;
         setRuns(r);
         logPhases(r);
         const done = r.length > 0 && r.every((x) => x.status === "completed");
@@ -244,8 +260,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         // Ne ragadjon be: ha 2 percig nem indult futás, vagy 45 percnél tovább tart, feladjuk a várakozást.
         if (!r.length && Date.now() - t0 > 120000) { setBuilding(false); add("Nem indult build ebben a 2 percben. Nézd meg az Actions oldalt, vagy indíts újat."); return; }
         if (Date.now() - t0 > 45 * 60000) { setBuilding(false); add("A build követése időtúllépés miatt leállt (45 perc). A ↻ gombbal újra lekérdezheted."); return; }
-      } catch (e: any) { add(`Build állapot hiba: ${e.message}`); }
-      if (!stop) timer = setTimeout(tick, 4000);
+      } catch (e: any) {
+        fails++;
+        if (fails === 1 || fails % 10 === 0) add(`Build állapot hiba: ${e.message}`);
+      } finally { running = false; }
+      if (!stop) timer = setTimeout(tick, fails ? Math.min(4000 * 2 ** Math.min(fails, 3), 30000) : 4000);
     };
     // Visszalépéskor azonnal újra lekérdez (a háttérben az időzítők lassulnak).
     const wake = () => { if (document.visibilityState === "visible") { if (timer) clearTimeout(timer); tick(); } };
@@ -415,7 +434,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 px-3 pb-3 pt-1">
+      <div className="land-grid mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 px-3 pb-3 pt-1">
+        <div className="land-col">
         <div className="flex gap-2">
           <RepoPicker repos={repos} value={repo} onChange={setRepo} />
           {repoZip ? (
@@ -445,11 +465,16 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
               onDrop={(e) => { e.preventDefault(); setDrag(false); onZip(e.dataTransfer.files[0]); }}
-              className={`flex min-h-[6.5rem] flex-[2] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
+              className={`win relative flex min-h-[6.5rem] flex-[2] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
             >
-              <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => onZip(e.target.files?.[0])} />
+              <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; onZip(f); }} />
               <div className="truncate font-mono text-sm">{zipName || "ZIP behúzása / tallózás"}</div>
               <div className="text-xs text-muted-foreground">{zipFiles.length ? `${zipFiles.length} fájl` : "letöltött repó szerkezet"}</div>
+              {zipName && (
+                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearZip(); }} title="Törlés" aria-label="Törlés" className="absolute bottom-2.5 right-2.5 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
+                  <X className="h-5 w-5" />
+                </button>
+              )}
             </label>
             <div className="flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
               <button onClick={() => setMode("replace")} title="Ami nincs a ZIP-ben, törlődik" className={`flex-1 rounded-xl px-2 py-2 font-semibold ${mode === "replace" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Teljes csere</button>
@@ -463,15 +488,9 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
               onDrop={async (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) setPatch(await f.text()); }}
-              className={`relative flex min-h-[6.5rem] flex-[2] overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
+              className={`win relative flex min-h-[6.5rem] flex-[2] overflow-hidden rounded-xl border-2 border-dashed ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
             >
-              <textarea
-                value={patch}
-                onChange={(e) => setPatch(e.target.value)}
-                aria-label="Diff / patch"
-                spellCheck={false}
-                className={`min-w-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs outline-none ${patch ? "pb-14" : ""}`}
-              />
+              <DiffEditor value={patch} onChange={setPatch} padBottom={!!patch} />
               {!patch && (
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
                   <button type="button" onClick={() => patchFile.current?.click()} className="pointer-events-auto max-w-full truncate font-mono text-sm">Diff behúzása / tallózás</button>
@@ -497,6 +516,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         <button disabled={busy || !repo} onClick={run} data-haptic="medium" className="truncate rounded-xl bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
         </button>
+        </div>
+        <div className="land-col">
         {release && release.id !== seenId && !active.length && !building && (
           <div className="shrink-0 space-y-1 rounded-xl border border-border bg-card p-1.5 font-mono text-[11px]">
             <div className="flex items-center gap-1">
@@ -572,13 +593,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         )}
         {logTab === "action" && active.length > 0 ? (
           <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
-            {`Frissítve: ${activeAt} · 8 mp-enként magától is\n\n`}{actionText(active)}
+            {`Frissítve: ${activeAt} · 8 mp-enként magától is\n${activeErr ? `⚠ A frissítés most nem sikerül (${activeErr}), az állapot elavult lehet.\n` : ""}\n`}{actionText(active)}
           </pre>
         ) : (
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
           {log.length ? log.join("\n") : "Napló…"}
         </pre>
         )}
+        </div>
         </div>
       </div>
     </main>

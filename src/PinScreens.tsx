@@ -7,11 +7,13 @@ import { Brand } from "@/Brand";
 function Shell({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <main className="flex min-h-[100dvh] flex-col pad-inset text-foreground">
-      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center space-y-4">
-        <div className="text-lg"><Brand /></div>
-        <h1 className="text-base font-bold">{title}</h1>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-        {children}
+      <div className="land-shell mx-auto flex w-full max-w-md flex-1 flex-col justify-center space-y-4">
+        <div className="space-y-4">
+          <div className="text-lg"><Brand /></div>
+          <h1 className="text-base font-bold">{title}</h1>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+        </div>
+        <div className="space-y-4">{children}</div>
       </div>
     </main>
   );
@@ -31,7 +33,7 @@ function PinPad({ value, onChange, disabled }: { value: string; onChange: (v: st
       <div className="flex justify-center gap-3" role="img" aria-label={`${value.length} / ${PIN_LEN} számjegy`}>
         {Array.from({ length: PIN_LEN }, (_, i) => <span key={i} className={`h-3.5 w-3.5 rounded-full border ${i < value.length ? "border-primary bg-primary" : "border-border"}`} />)}
       </div>
-      <div className="mx-auto grid max-w-[260px] grid-cols-3 gap-2 font-mono text-xl">
+      <div className="pad-keys mx-auto grid max-w-[260px] grid-cols-3 gap-2 font-mono text-xl">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => <button key={d} type="button" disabled={disabled} onClick={() => press(d)} className={key}>{d}</button>)}
         <span />
         <button type="button" disabled={disabled} onClick={() => press("0")} className={key}>0</button>

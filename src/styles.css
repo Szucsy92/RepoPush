@@ -247,3 +247,22 @@ button:not(:disabled):active, a[href]:active, label[class*="cursor-pointer"]:act
 .pad-inset {
   padding: calc(1rem + var(--inset-top, 0px)) calc(1rem + var(--inset-right, 0px)) calc(1rem + var(--inset-bottom, 0px)) calc(1rem + var(--inset-left, 0px));
 }
+
+/* ---- Landscape phones (low and wide): controls on the left, the log on the right ---- */
+.land-col { display: contents; }
+@media (orientation: landscape) and (max-height: 34rem) {
+  .land-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(min-content, 1fr);
+    column-gap: 0.5rem;
+    max-width: none;
+    overflow-y: auto;
+    padding-bottom: 0.5rem;
+  }
+  .land-col { display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; }
+  .land-grid .win { min-height: 4.25rem; }
+  .land-shell { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); column-gap: 1.5rem; align-items: center; max-width: 42rem; }
+  .land-shell > * { margin: 0; }
+  .pad-keys button { padding-block: 0.3rem; }
+}

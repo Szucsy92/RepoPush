@@ -10,7 +10,7 @@ export function ConfirmDialog({ plan, repo, branch, mode, onOk, onCancel }: {
   );
   return (
     <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-sm space-y-2 rounded-2xl border border-border bg-popover p-4 shadow-2xl">
+      <div className="max-h-[92dvh] w-full max-w-sm space-y-2 overflow-y-auto rounded-2xl border border-border bg-popover p-4 shadow-2xl">
         <h2 className="font-bold">Biztosan végrehajtod?</h2>
         <div className="font-mono text-xs">{repo} @ <b>{branch}</b> · {mode}</div>
         <div className="grid grid-cols-3 gap-1 text-center font-mono text-xs">

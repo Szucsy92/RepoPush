@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import { classifyDiff, type DiffKind } from "@/lib/diffview";
 
 const COLOR: Record<DiffKind, string> = {
-  add: "bg-primary/10 text-primary",
+  add: "bg-ok-soft text-ok",
   del: "bg-destructive/10 text-destructive",
   hunk: "text-sky-400",
   file: "text-yellow-300/80",

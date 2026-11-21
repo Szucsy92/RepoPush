@@ -122,6 +122,7 @@ jobs:
               registerPlugin(BiometricVaultPlugin.class);
               registerPlugin(PressHapticsPlugin.class);
               registerPlugin(SystemInsetsPlugin.class);
+              registerPlugin(AppIconPlugin.class);
               super.onCreate(savedInstanceState);
               WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
               getWindow().setStatusBarColor(Color.TRANSPARENT);
@@ -146,6 +147,7 @@ jobs:
           sed "s/__PKG__/$PKG/" native/BiometricVaultPlugin.java > "$(dirname "$MA")/BiometricVaultPlugin.java"
           sed "s/__PKG__/$PKG/" native/PressHapticsPlugin.java > "$(dirname "$MA")/PressHapticsPlugin.java"
           sed "s/__PKG__/$PKG/" native/SystemInsetsPlugin.java > "$(dirname "$MA")/SystemInsetsPlugin.java"
+          sed "s/__PKG__/$PKG/" native/AppIconPlugin.java > "$(dirname "$MA")/AppIconPlugin.java"
           printf '\ndependencies {\n    implementation "androidx.biometric:biometric:1.1.0"\n}\n' >> android/app/build.gradle
 
           # Az app tokent tárol: ne kerüljön Google-biztonsági mentésbe.
@@ -155,6 +157,32 @@ jobs:
           grep -q USE_BIOMETRIC android/app/src/main/AndroidManifest.xml || sed -i 's#<application#<uses-permission android:name="android.permission.USE_BIOMETRIC" />\n    <application#' android/app/src/main/AndroidManifest.xml
           # Rezgés a gombnyomásra (haptic).
           grep -q android.permission.VIBRATE android/app/src/main/AndroidManifest.xml || sed -i 's#<application#<uses-permission android:name="android.permission.VIBRATE" />\n    <application#' android/app/src/main/AndroidManifest.xml
+
+          # Váltható indítóikon (színtéma, easter egg): az ikonok XML-erőforrások (native/res), az indító belépési pont
+          # pedig aliasokra kerül: az AppIcon plugin mindig az egyiket engedélyezi, a többit letiltja.
+          cp -r native/res/. android/app/src/main/res/
+          python3 - <<'PY'
+          p = "android/app/src/main/AndroidManifest.xml"
+          s = open(p, encoding="utf-8").read()
+          s = s.replace('<category android:name="android.intent.category.LAUNCHER" />', "", 1)
+          def alias(name, icon, round_icon, enabled):
+              return (
+                  '\n        <activity-alias android:name=".%s" android:targetActivity=".MainActivity"'
+                  ' android:enabled="%s" android:exported="true"'
+                  ' android:icon="@mipmap/%s" android:roundIcon="@mipmap/%s" android:label="@string/app_name">'
+                  '\n            <intent-filter>'
+                  '\n                <action android:name="android.intent.action.MAIN" />'
+                  '\n                <category android:name="android.intent.category.LAUNCHER" />'
+                  '\n            </intent-filter>'
+                  '\n        </activity-alias>' % (name, enabled, icon, round_icon)
+              )
+          items = [("IconDefault", "ic_launcher", "ic_launcher_round", "true")] + [
+              ("Icon" + n.capitalize(), "repopush_icon_" + n, "repopush_icon_" + n, "false") for n in ("coral", "sky", "sun", "violet")
+          ]
+          s = s.replace("</application>", "".join(alias(*i) for i in items) + "\n    </application>", 1)
+          open(p, "w", encoding="utf-8").write(s)
+          assert s.count("android.intent.category.LAUNCHER") == 5, "A manifest indító aliasai nem jöttek létre"
+          PY
 
           # Növekvő verziószám, hogy az új APK az előzőre telepíthető legyen.
           G=android/app/build.gradle

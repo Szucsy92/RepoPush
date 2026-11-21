@@ -174,7 +174,29 @@
   --border: oklch(0.3 0.015 250);
   --input: oklch(0.3 0.015 250);
   --ring: oklch(0.82 0.17 145);
+  --ok: oklch(0.82 0.17 145); /* success / added: stays green in every theme */
+  --brand: #3ee07a;           /* brand letters and mark: the colour of the icon */
+  --hue-a: 165; --hue-b: 250; --hue-c: 145; /* hues of the ambient background glow */
 }
+/* Colour themes (easter egg, see src/lib/theme.ts). The launcher icon colours in native/res must match --brand. */
+:root[data-theme="coral"] {
+  --primary: oklch(0.74 0.17 29); --primary-foreground: oklch(0.2 0.03 29); --ring: oklch(0.74 0.17 29);
+  --accent: oklch(0.27 0.045 29); --brand: #ff6f61; --hue-a: 25; --hue-b: 340; --hue-c: 45;
+}
+:root[data-theme="sky"] {
+  --primary: oklch(0.8 0.12 235); --primary-foreground: oklch(0.2 0.03 235); --ring: oklch(0.8 0.12 235);
+  --accent: oklch(0.27 0.04 235); --brand: #4cc3ff; --hue-a: 235; --hue-b: 275; --hue-c: 205;
+}
+:root[data-theme="sun"] {
+  --primary: oklch(0.88 0.16 92); --primary-foreground: oklch(0.22 0.04 92); --ring: oklch(0.88 0.16 92);
+  --accent: oklch(0.28 0.05 92); --brand: #ffd23f; --hue-a: 85; --hue-b: 50; --hue-c: 110;
+}
+:root[data-theme="violet"] {
+  --primary: oklch(0.66 0.22 295); --primary-foreground: oklch(0.98 0.01 295); --ring: oklch(0.66 0.22 295);
+  --accent: oklch(0.28 0.07 295); --brand: #9b6bff; --hue-a: 295; --hue-b: 260; --hue-c: 325;
+}
+.text-ok { color: var(--ok); }
+.bg-ok-soft { background-color: color-mix(in oklab, var(--ok) 10%, transparent); }
 .field {
   width: 100%;
   border-radius: calc(var(--radius) + 4px);
@@ -191,9 +213,9 @@
    over the soft ambient gradient and the fine grain behind the app. */
 body {
   background-image:
-    radial-gradient(48rem 32rem at 88% -8%, oklch(0.55 0.15 165 / 0.30), transparent 62%),
-    radial-gradient(40rem 34rem at -12% 38%, oklch(0.48 0.13 250 / 0.26), transparent 62%),
-    radial-gradient(36rem 28rem at 70% 108%, oklch(0.55 0.15 145 / 0.22), transparent 62%);
+    radial-gradient(48rem 32rem at 88% -8%, oklch(0.55 0.15 var(--hue-a) / 0.30), transparent 62%),
+    radial-gradient(40rem 34rem at -12% 38%, oklch(0.48 0.13 var(--hue-b) / 0.26), transparent 62%),
+    radial-gradient(36rem 28rem at 70% 108%, oklch(0.55 0.15 var(--hue-c) / 0.22), transparent 62%);
   background-attachment: fixed;
   -webkit-tap-highlight-color: transparent;
 }

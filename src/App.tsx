@@ -708,12 +708,12 @@ function buildSummary(runs: Run[], building: boolean): { dot: string; text: stri
   }
   const bad = runs.filter((r) => r.conclusion && !["success", "skipped", "cancelled"].includes(r.conclusion));
   if (bad.length) return { dot: "text-destructive", text: `✖ ${bad[0]!.name}: ${bad[0]!.conclusion}${bad.length > 1 ? ` +${bad.length - 1}` : ""}` };
-  return { dot: "text-primary", text: `✔ Kész · ${runs.length} futás` };
+  return { dot: "text-ok", text: `✔ Kész · ${runs.length} futás` };
 }
 
 function dot(s: string, c: string | null) {
   if (s !== "completed") return "text-primary animate-pulse";
-  return c === "success" ? "text-primary" : c === "skipped" || c === "cancelled" ? "text-muted-foreground" : "text-destructive";
+  return c === "success" ? "text-ok" : c === "skipped" || c === "cancelled" ? "text-muted-foreground" : "text-destructive";
 }
 
 function safe<T>(f: () => T, d: T): T { try { return f(); } catch { return d; } }

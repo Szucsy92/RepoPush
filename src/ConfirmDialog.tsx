@@ -14,12 +14,12 @@ export function ConfirmDialog({ plan, repo, branch, mode, onOk, onCancel }: {
         <h2 className="font-bold">Biztosan végrehajtod?</h2>
         <div className="font-mono text-xs">{repo} @ <b>{branch}</b> · {mode}</div>
         <div className="grid grid-cols-3 gap-1 text-center font-mono text-xs">
-          <div className="rounded border border-border p-1"><div className="text-lg text-primary">{plan.added.length}</div>új</div>
+          <div className="rounded border border-border p-1"><div className="text-lg text-ok">{plan.added.length}</div>új</div>
           <div className="rounded border border-border p-1"><div className="text-lg">{plan.modified.length}</div>módosul</div>
           <div className="rounded border border-border p-1"><div className="text-lg text-destructive">{plan.deleted.length}</div>törlődik</div>
         </div>
         {plan.unchanged > 0 && <div className="text-xs text-muted-foreground">{plan.unchanged} fájl változatlan.</div>}
-        {list("Új", plan.added, "text-primary")}
+        {list("Új", plan.added, "text-ok")}
         {list("Módosul", plan.modified, "")}
         {list("Törlődik", plan.deleted, "text-destructive")}
         <div className="text-xs text-muted-foreground">Az ág kényszerített frissítése felülírja az ág jelenlegi állapotát.</div>

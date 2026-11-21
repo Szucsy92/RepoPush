@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The ">_" mark of the app icon in the sun theme colour (same size as the default icon: the mark fills ~66% of the adaptive-icon canvas). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="776"
+    android:viewportHeight="776">
+    <group
+        android:translateX="131"
+        android:translateY="132">
+        <path
+            android:fillColor="#FFD23F"
+            android:strokeColor="#FFD23F"
+            android:strokeWidth="2"
+            android:strokeLineJoin="round"
+            android:pathData="M170,124 L296,234 L304,246 L306,260 L304,268 L294,278 L170,388 L138,350 L242,258 L136,162 Z" />
+        <path
+            android:fillColor="#FFD23F"
+            android:pathData="M296,337 L379,337 L379,389 L296,389 Z" />
+    </group>
+</vector>

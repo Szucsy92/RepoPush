@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { parsePatch, applyPatch } from "diff";
+import { alreadyApplied } from "@/lib/patch-state";
 
 export type LocalFile = { path: string; base64: string };
 
@@ -36,9 +37,17 @@ export function patchTargets(text: string): PatchTarget[] {
     .map((p) => ({ oldPath: clean(p.oldFileName), newPath: clean(p.newFileName), hunks: p.hunks.length }));
 }
 
+type FilePatch = ReturnType<typeof parsePatch>[number];
+
+/** Which hunks (1-based) do not match the file on their own: tells the user where a diff and the repo part ways. */
+function failedHunks(src: string, p: FilePatch): number[] {
+  return p.hunks.flatMap((h, i) => (applyPatch(src, { ...p, hunks: [h] }, { fuzzFactor: 3 }) === false ? [i + 1] : []));
+}
+
 export function applyPatchText(text: string, sources: Record<string, string | null>) {
   const ops: { path: string; content?: string; delete?: boolean }[] = [];
   const errors: string[] = [];
+  const skipped: string[] = []; // files whose changes are already in the repo
   for (const p of parsePatch(text)) {
     const oldP = clean(p.oldFileName);
     const newP = clean(p.newFileName);
@@ -49,13 +58,22 @@ export function applyPatchText(text: string, sources: Record<string, string | nu
     }
     const src = oldP ? sources[oldP] ?? "" : "";
     let res: string | false = applyPatch(src, p);
-    if (res === false) res = applyPatch(src, p, { fuzzFactor: 3 });
     if (res === false) {
-      errors.push(`Nem illeszthető: ${newP}`);
+      // Before any fuzzy matching: a diff that is already in the file is not applied a second time.
+      if (oldP && alreadyApplied(src, p.hunks)) { skipped.push(newP); continue; }
+      res = applyPatch(src, p, { fuzzFactor: 3 });
+    }
+    if (res === false) {
+      const bad = failedHunks(src, p);
+      errors.push(
+        `Nem illeszthető: ${newP}` +
+          (bad.length ? ` (a(z) ${bad.join(", ")}. blokk nem egyezik a repó jelenlegi tartalmával: a diff egy másik változatra készült, vagy egy korábbi diff még nincs alkalmazva)` : " (a blokkok együtt nem illeszthetők)"),
+      );
       continue;
     }
+    if (oldP === newP && res === src) { skipped.push(newP); continue; } // nothing would change
     ops.push({ path: newP, content: res });
     if (oldP && oldP !== newP) ops.push({ path: oldP, delete: true });
   }
-  return { ops, errors };
+  return { ops, errors, skipped };
 }

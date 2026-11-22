@@ -521,9 +521,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         setStage(2); setStep("Eredeti fájlok letöltése"); setPct(20);
         add(`Patch: ${t.length} fájl, eredeti tartalom letöltése…`);
         const src = await gh.getFiles(repo, branch, paths);
-        const { ops, errors } = applyPatchText(patch, src);
+        const { ops, errors, skipped } = applyPatchText(patch, src);
+        skipped.forEach((f) => add(`  = ${f}: már alkalmazva, kihagyva`));
         errors.forEach((e) => add(e));
         if (errors.length) throw new Error("A patch nem minden része illeszthető, semmi sem lett feltöltve.");
+        if (!ops.length) {
+          add("Ez a diff már alkalmazva van a repón (nincs mit feltölteni), nem készült commit.");
+          setStage(3); setPct(100); setStep("Már alkalmazva");
+          return;
+        }
         ops.forEach((o) => add(`  ${o.delete ? "−" : "~"} ${o.path}`));
         const pl: Plan = { added: [], modified: [], deleted: [], unchanged: 0 };
         ops.forEach((o) => (o.delete ? pl.deleted : src[o.path] == null ? pl.added : pl.modified).push(o.path));

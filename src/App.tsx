@@ -60,7 +60,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const phases = useRef<Record<string, string>>({});
   const [seenId, setSeenId] = useState<string | undefined>();
   const [active, setActive] = useState<Run[]>([]);
-  const [logTab, setLogTab] = useState<"log" | "action">("log");
   const activeRef = useRef<Run[]>([]);
   const buildingRef = useRef(false);
   const pokeRef = useRef<(() => Promise<void>) | null>(null);
@@ -160,11 +159,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   }, [repo]);
 
   useEffect(() => { buildingRef.current = building; }, [building]);
+  // Minden futás egyben: amit a build sáv követ (Build gomb, feltöltés utáni futások) és amit a figyelő talált (push, más gép).
+  const allRuns = [...runs, ...active.filter((a) => !runs.some((r) => r.id === a.id))];
+  const openAll = allRuns.filter((x) => x.status !== "completed");
+  const running = building || openAll.length > 0;
   useEffect(() => {
-    if (building) return;
+    if (running) return;
     setStopping(false); setForceReady(false); cancelWanted.current = false;
     if (forceTimer.current) clearTimeout(forceTimer.current);
-  }, [building]);
+  }, [running]);
 
   // Leállítás kérve egy-egy futásra (az Action fülről vagy a build sáv listájából): futásonként követjük, mikor kérték.
   const [stopReq, setStopReq] = useState<Record<number, number>>({});
@@ -193,7 +196,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   // push által indított, másik helyről indított), „Action folyamatban” fület kap élő lépésekkel, és a fázisai
   // a naplóba is bekerülnek. Menet közben induló futásokat is felvesz.
   useEffect(() => {
-    setActive([]); setLogTab("log"); activeRef.current = []; actPhases.current = {};
+    setActive([]); activeRef.current = []; actPhases.current = {};
     if (!repo) return;
     let alive = true;
     let first = true;
@@ -222,7 +225,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             logPhases(done, actPhases.current);
             add(`ACTION KÉSZ: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
             gone.forEach((x) => { tracked.delete(x.id); seenDone.add(x.id); });
-            if (!mine.length) setLogTab("log");
             setRelTick((n) => n + 1);
           }
           // Ami úgy futott le, hogy nem láttuk futni (gyors futás, két lekérdezés között): legalább az eredményét jelezzük.
@@ -233,7 +235,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           }
           unseen.forEach((x) => seenDone.add(x.id));
           logPhases(mine, actPhases.current);
-          if (!prev.length && mine.length) setLogTab("action");
           activeRef.current = mine;
           setActive(mine);
           setActiveAt(new Date().toLocaleTimeString());
@@ -364,7 +365,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   }
 
   async function build() {
-    setBuilding(true); setRuns([]); phases.current = {}; setLogTab("log");
+    setBuilding(true); setRuns([]); phases.current = {};
     setStopping(false); setForceReady(false); cancelWanted.current = false;
     const t = new Date(Date.now() - 5000).toISOString().replace(/\.\d+Z$/, "Z");
     try {
@@ -417,11 +418,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     if (ok.length) add(`${force ? "KÉNYSZERÍTETT LEÁLLÍTÁS" : "LEÁLLÍTÁS"} kérve: ${ok.join(", ")}`);
   }
 
-  // Ugyanaz a gomb: Build → futás közben Mégse / Leállítás → ha nem hat, Kényszerítés.
+  // Ugyanaz a gomb: Build → futás közben Leállítás (minden futó action, bárhol indult) → ha nem hat, Kényszerítés.
   async function stopBuild() {
     const force = stopping && forceReady;
     if (stopping && !forceReady) return;
-    const open = runs.filter((x) => x.status !== "completed");
+    const open = openAll;
     if (!open.length) {
       // Még nem jelent meg a futás a GitHubon: amint megjelenik, leállítjuk.
       cancelWanted.current = true;
@@ -429,14 +430,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
       add("MÉGSE: a build leáll, amint megjelenik a GitHubon.");
       return;
     }
-    const names = open.map((x) => x.name).join(", ");
-    const q = force ? `A leállítás nem hatott. Kényszeríted a leállítást? (${names})` : `Leállítod a futó buildet? (${names})`;
+    const names = open.map((x) => `${x.name} (${x.event})`).join(", ");
+    const q = force ? `A leállítás nem hatott. Kényszeríted a leállítást? (${names})` : `Leállítod az összes futó actiont? (${names})`;
     if (!window.confirm(q)) return;
     setStopping(true); setForceReady(false);
     if (forceTimer.current) clearTimeout(forceTimer.current);
     forceTimer.current = setTimeout(() => setForceReady(true), 15000);
     await cancelOpen(open, force);
     setPollTick((n) => n + 1); // az új állapot azonnal látszik
+    void pokeRef.current?.();
   }
 
   // Bármelyik futó action leállítható, akkor is, ha nem a Build gombbal indult (push, másik gép, GitHub-oldal).
@@ -551,8 +553,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     }
   }
 
-  const sum = buildSummary(runs, building);
-  const openRuns = runs.filter((x) => x.status !== "completed");
+  const sum = stateSummary({ stage, step, pct, runs: allRuns, building, hasRepo: !!repo, err: activeErr });
 
   return (
     <>
@@ -681,38 +682,25 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           </div>
         )}
         <div ref={cardRef} className="flex min-h-[9rem] flex-[5] flex-col overflow-hidden rounded-xl border border-border bg-card">
-        {repo && (
-          <div className="flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
-            <button onClick={() => setLogTab("log")} className={`rounded border px-2 py-1 ${logTab === "log" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>Napló</button>
-            {active.length > 0 && (
-              <button onClick={() => setLogTab("action")} className={`min-w-0 flex-1 truncate rounded border px-2 py-1 text-left ${logTab === "action" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
-                <span className="animate-pulse text-primary">●</span> Action folyamatban ({active.length})
-              </button>
-            )}
-            <button onClick={refresh} disabled={refreshing} title={refreshedAt ? `Állapot frissítése · utoljára: ${refreshedAt}` : "Állapot frissítése"} className="ml-auto flex shrink-0 items-center gap-1 rounded border border-border px-2 py-1 disabled:opacity-70">
-              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-primary" : ""}`} />
-              {refreshing ? "Frissítés…" : refreshedAt || "Frissítés"}
+        {/* One state strip for the whole area: the upload, or what the actions are doing (started here or elsewhere).
+            Tap it for the details. The button is Build, or Stop (everything) while something runs. */}
+        <div ref={stripRef} className="relative flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
+          <div ref={ddRef} className="min-w-0 flex-1">
+            <button onClick={() => setDdOpen((o) => !o)} aria-expanded={ddOpen} className="flex w-full items-center gap-1 rounded border border-border px-2 py-1.5 text-left">
+              <span className={sum.dot}>●</span>
+              <span className="min-w-0 flex-1 truncate">{sum.text}</span>
+              <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${ddOpen ? "rotate-180" : ""}`} />
             </button>
-          </div>
-        )}
-        {/* Progress is part of the log window: the stage and step as one line, with a thin bar from Start to Finish. */}
-        <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="relative flex shrink-0 items-center gap-1.5 px-3 pb-1.5 pt-1 font-mono text-[11px]">
-          <span className={`shrink-0 font-bold ${stage === -1 ? "text-destructive" : stage === 1 || stage === 2 ? "animate-pulse" : ""}`}>{stage === -1 ? "Hiba" : stage === 1 ? "Start" : stage === 2 ? "Process" : stage === 3 ? "Finish" : "Várakozás"}</span>
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">{stage === 0 ? "" : step}</span>
-          {stage !== 0 && <span className="shrink-0">{pct}%</span>}
-          <div className="absolute inset-x-0 bottom-0 h-0.5 bg-border/40"><div className={`h-full transition-all ${stage === -1 ? "bg-destructive" : "bg-primary"}`} style={{ width: `${pct}%` }} /></div>
-        </div>
-        {stage === 3 && (
-          <div ref={stripRef} className="relative flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
-            <div ref={ddRef} className="min-w-0 flex-1">
-              <button onClick={() => setDdOpen((o) => !o)} aria-expanded={ddOpen} className="flex w-full items-center gap-1 rounded border border-border px-2 py-1.5 text-left">
-                <span className={sum.dot}>●</span>
-                <span className="min-w-0 flex-1 truncate">{sum.text}</span>
-                <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${ddOpen ? "rotate-180" : ""}`} />
-              </button>
-              {ddOpen && (
-                <div style={{ maxHeight: ddMax }} className="absolute left-1 right-1 top-full z-10 mt-0.5 space-y-1 overflow-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl">
-                  {runs.map((x) => (
+            {ddOpen && (
+              <div style={{ maxHeight: ddMax }} className="absolute left-1 right-1 top-full z-10 mt-0.5 space-y-1 overflow-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl">
+                <div className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+                  <div className="min-w-0 flex-1">
+                    {activeAt ? `Frissítve: ${activeAt} · 8 mp-enként magától is` : "Még nem frissült"}
+                    {activeErr && <div className="text-yellow-300">⚠ A frissítés most nem sikerül ({activeErr}), az állapot elavult lehet.</div>}
+                  </div>
+                  <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} className="shrink-0 rounded border border-border px-2 py-0.5">{isNative() ? "⧉ napló" : "⇩ napló"}</button>
+                </div>
+                {allRuns.map((x) => (
                     <div key={x.id} className="space-y-0.5">
                       <div className="flex items-center gap-1">
                         <span className={dot(x.status, x.conclusion)}>●</span>
@@ -731,52 +719,31 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                       ))}
                     </div>
                   ))}
-                  {!runs.length && <div className={`text-muted-foreground ${building ? "animate-pulse" : ""}`}>{building ? "Várakozás a GitHubra…" : "Még nincs követett build."}</div>}
-                </div>
-              )}
+                {!allRuns.length && <div className={`text-muted-foreground ${building ? "animate-pulse" : ""}`}>{building ? "Várakozás a GitHubra…" : "Nincs követett futás."}</div>}
+              </div>
+            )}
+          </div>
+          <button onClick={refresh} disabled={refreshing} title={refreshedAt ? `Állapot frissítése · utoljára: ${refreshedAt}` : "Állapot frissítése"} aria-label="Állapot frissítése" className="flex shrink-0 items-center justify-center rounded border border-border px-2 py-1.5 disabled:opacity-70">
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin text-primary" : ""}`} />
+          </button>
+          <button
+            disabled={(!running && !repo) || (running && stopping && !forceReady)}
+            onClick={running ? stopBuild : build}
+            data-haptic="medium"
+            title={running ? (stopping && forceReady ? "Kényszerített leállítás (force-cancel)" : "Az összes futó action leállítása") : "Friss build indítása"}
+            className={`shrink-0 rounded px-2 py-1.5 font-bold disabled:opacity-60 ${running ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground"}`}
+          >
+            {!running ? (runs.length ? "Új build" : "▶ Build") : !stopping ? (openAll.length ? "■ Leállítás" : "Mégse") : forceReady ? "Kényszerítés" : "Leállítás…"}
+          </button>
+          {sum.progress && (
+            <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="absolute inset-x-1 bottom-0 h-0.5 overflow-hidden rounded bg-border/40">
+              <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
-            <button
-              disabled={building && stopping && !forceReady}
-              onClick={building ? stopBuild : build}
-              data-haptic="medium"
-              title={building ? (stopping && forceReady ? "Kényszerített leállítás (force-cancel)" : "A futó build leállítása") : "Friss build indítása"}
-              className={`shrink-0 rounded px-2 py-1.5 font-bold disabled:opacity-60 ${building ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground"}`}
-            >
-              {!building ? (runs.length ? "Új build" : "▶ Build") : !stopping ? (openRuns.length ? "■ Leállítás" : "Mégse") : forceReady ? "Kényszerítés" : "Leállítás…"}
-            </button>
-            <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} aria-label={isNative() ? "Napló másolása" : "Napló mentése"} className="shrink-0 rounded border border-border px-2 py-1.5">{isNative() ? "⧉" : "⇩"}</button>
-          </div>
-        )}
-        {logTab === "action" && active.length > 0 && (
-          <div className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-border px-2 py-1.5 font-mono text-[11px]">
-            {active.map((r) => {
-              const at = stopReq[r.id];
-              const force = !!at && Date.now() - at > 15000;
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  disabled={!!at && !force}
-                  onClick={() => stopActive(r, force)}
-                  data-haptic="medium"
-                  title={force ? "Kényszerített leállítás (force-cancel)" : `Leállítás: ${r.name} (${r.event})`}
-                  className="max-w-[16rem] shrink-0 truncate rounded-full border border-destructive/60 px-3 py-1 text-destructive disabled:opacity-60"
-                >
-                  {at ? (force ? `Kényszerítés · ${r.name}` : "Leállítás…") : `■ Leállítás · ${r.name}`}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {logTab === "action" && active.length > 0 ? (
-          <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
-            {`Frissítve: ${activeAt} · 8 mp-enként magától is\n${activeErr ? `⚠ A frissítés most nem sikerül (${activeErr}), az állapot elavult lehet.\n` : ""}\n`}{actionText(active)}
-          </pre>
-        ) : (
+          )}
+        </div>
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
           {log.length ? log.join("\n") : "Napló…"}
         </pre>
-        )}
         </div>
         </div>
       </div>
@@ -790,42 +757,26 @@ function stamp(iso: string): string {
   return new Date(iso).toLocaleString("hu-HU", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function stepIcon(s: string, c: string | null) {
-  if (s !== "completed") return s === "in_progress" ? "▶" : "○";
-  return c === "success" ? "✔" : c === "skipped" || c === "cancelled" ? "–" : "✖";
-}
-
-// Futó/lefutott action élő állapota: hol tart épp a build.
-const STATUS_HU: Record<string, string> = {
-  queued: "sorban áll", in_progress: "fut", requested: "indul",
-  waiting: "vár (jóváhagyásra vagy az előző futásra)", pending: "másik futás után indul (concurrency)",
-};
-function actionText(runs: Run[]): string {
-  return runs.map((r) => {
-    const mins = r.created ? Math.max(0, Math.round((Date.now() - Date.parse(r.created)) / 60000)) : null;
-    const since = r.created ? ` · ${new Date(r.created).toLocaleTimeString("hu-HU", { hour: "2-digit", minute: "2-digit" })}-kor indult (${mins} perce)` : "";
-    const head = `${stepIcon(r.status, r.conclusion)} ${r.name} (${r.event}) · ${r.conclusion ?? STATUS_HU[r.status] ?? r.status}${since}`;
-    const jobs = r.jobs.length ? r.jobs.map((j) => {
-      const done = j.steps.filter((x) => x.status === "completed").length;
-      const cur = j.steps.find((x) => x.status === "in_progress");
-      const where = j.status !== "completed" ? `\n    Most itt tart: ${cur ? cur.name : "várakozás a futtatóra"} (${done}/${j.steps.length})` : "";
-      const steps = j.steps.map((x) => `      ${stepIcon(x.status, x.conclusion)} ${x.name}`).join("\n");
-      return `  ${stepIcon(j.status, j.conclusion)} ${j.name}${where}\n${steps}`;
-    }).join("\n") : "  (még nincs job: a GitHub most állítja össze, sorban áll a futtatóra, vagy másik futás után indul; ha régóta így van, nyisd meg a futás oldalát)";
-    return `${head}\n${jobs}\n  ${r.url}`;
-  }).join("\n\n");
+// One line for the whole bottom area: the upload while it runs, otherwise what the actions (started here or elsewhere) are doing.
+function stateSummary(o: { stage: number; step: string; pct: number; runs: Run[]; building: boolean; hasRepo: boolean; err: string }): { dot: string; text: string; progress: boolean } {
+  if (!o.hasRepo) return { dot: "text-muted-foreground", text: "Válassz repót", progress: false };
+  if (o.stage === 1 || o.stage === 2) return { dot: "text-primary animate-pulse", text: `${o.stage === 1 ? "Start" : "Process"} · ${o.step} · ${o.pct}%`, progress: true };
+  if (o.stage === -1) return { dot: "text-destructive", text: `Hiba · ${o.step}`, progress: false };
+  if (!o.runs.length && !o.building && o.stage === 3) return { dot: "text-ok", text: "✔ Feltöltve · nincs futó action", progress: false };
+  const b = buildSummary(o.runs, o.building);
+  return { ...b, text: (o.err ? "⚠ " : "") + b.text, progress: false };
 }
 
 // The one-line state of the tracked build: what runs right now, otherwise how it ended.
 function buildSummary(runs: Run[], building: boolean): { dot: string; text: string } {
-  if (!runs.length) return building ? { dot: "text-primary animate-pulse", text: "Várakozás a GitHubra…" } : { dot: "text-muted-foreground", text: "Nincs követett build" };
+  if (!runs.length) return building ? { dot: "text-primary animate-pulse", text: "Várakozás a GitHubra…" } : { dot: "text-muted-foreground", text: "Nincs futó action" };
   const running = runs.filter((r) => r.status !== "completed");
   if (running.length) {
     const r = running[0]!;
     const j = r.jobs.find((x) => x.status !== "completed") ?? r.jobs[0];
     const step = j?.steps.find((x) => x.status === "in_progress");
     const done = j ? j.steps.filter((x) => x.status === "completed").length : 0;
-    const where = [r.name, j && j.name !== r.name ? j.name : "", step?.name ?? (j ? "várakozás" : "")].filter(Boolean).join(" · ");
+    const where = [r.name, j && j.name !== r.name ? j.name : "", step?.name ?? (j ? "várakozás" : r.status === "queued" ? "sorban áll" : r.status === "pending" ? "előző futásra vár" : "")].filter(Boolean).join(" · ");
     return { dot: "text-primary animate-pulse", text: `${where}${j?.steps.length ? ` (${done}/${j.steps.length})` : ""}${running.length > 1 ? ` +${running.length - 1}` : ""}` };
   }
   const bad = runs.filter((r) => r.conclusion && !["success", "skipped", "cancelled"].includes(r.conclusion));

@@ -4,16 +4,17 @@ import { PIN_LEN, MAX_FAILS, biometricEnabled, biometricSupported, enableBiometr
 import { dropPlainToken } from "@/lib/token";
 import { Brand } from "@/Brand";
 
-function Shell({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+function Shell({ title, hint, children, aside }: { title: string; hint?: string; children: ReactNode; aside?: ReactNode }) {
   return (
     <main className="flex min-h-[100dvh] flex-col pad-inset text-foreground">
       <div className="land-shell mx-auto flex w-full max-w-md flex-1 flex-col justify-center space-y-4">
-        <div className="space-y-4">
+        <div className="land-head space-y-4">
           <div className="text-lg"><Brand /></div>
           <h1 className="text-base font-bold">{title}</h1>
           {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
         </div>
-        <div className="space-y-4">{children}</div>
+        <div className="land-body space-y-4">{children}</div>
+        {aside && <div className="land-aside space-y-2">{aside}</div>}
       </div>
     </main>
   );
@@ -68,19 +69,18 @@ export function PinSetup({ token, onDone, onBack }: { token: string; onDone: (to
     return (
       <Shell title="Biometrikus azonosítás" hint="Az app megnyitásakor ujjlenyomattal vagy arccal is feloldhatod. A PIN-t ettől még jegyezd meg: ha a biometria nem működik, azt kérjük.">
         {err && <div className="rounded border border-destructive p-2 text-xs text-destructive">{err}</div>}
-        <button disabled={busy} onClick={async () => { setBusy(true); const r = await enableBiometric(pin); setBusy(false); if (r.ok) onDone(token); else setErr(`A biometrikus azonosítás bekapcsolása nem sikerült: ${r.reason}`); }} className="w-full rounded-md bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
+        <button disabled={busy} onClick={async () => { setBusy(true); const r = await enableBiometric(pin); setBusy(false); if (r.ok) onDone(token); else setErr(`A biometrikus azonosítás bekapcsolása nem sikerült: ${r.reason}`); }} className="w-full rounded-xl bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           Bekapcsolás
         </button>
-        <button disabled={busy} onClick={() => onDone(token)} className="w-full rounded-md border border-border px-3 py-2.5 font-mono text-sm">Most nem</button>
+        <button disabled={busy} onClick={() => onDone(token)} className="w-full rounded-xl border border-border px-3 py-2.5 font-mono text-sm">Most nem</button>
       </Shell>
     );
   }
   return (
-    <Shell title={step === "set" ? "PIN-kód beállítása" : "PIN megerősítése"} hint={step === "set" ? "Adj meg egy 6 számjegyű PIN-t. Ez védi a tokent, az app megnyitásakor ezt kérjük." : "Írd be még egyszer ugyanazt a PIN-t."}>
+    <Shell aside={<button onClick={onBack} className="mx-auto block text-xs text-muted-foreground underline">Vissza a tokenhez</button>} title={step === "set" ? "PIN-kód beállítása" : "PIN megerősítése"} hint={step === "set" ? "Adj meg egy 6 számjegyű PIN-t. Ez védi a tokent, az app megnyitásakor ezt kérjük." : "Írd be még egyszer ugyanazt a PIN-t."}>
       {err && <div className="rounded border border-destructive p-2 text-xs text-destructive">{err}</div>}
       <PinPad value={pin} onChange={setPin} disabled={busy} />
       <div className="text-center font-mono text-[11px] text-muted-foreground">{busy ? "Titkosítás…" : "\u00a0"}</div>
-      <button onClick={onBack} className="mx-auto block text-xs text-muted-foreground underline">Vissza a tokenhez</button>
     </Shell>
   );
 }
@@ -147,7 +147,20 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
 
   const sw = "w-full rounded-md border border-border px-3 py-2.5 font-mono text-sm";
   return (
-    <Shell title={opened !== null ? "Biometrikus azonosítás bekapcsolása" : mode === "bio" ? "Biometrikus feloldás" : "PIN megadása"} hint={opened === null && mode === "pin" && enroll ? "Add meg a PIN-t, utána bekapcsoljuk a biometrikus azonosítást." : undefined}>
+    <Shell aside={
+      opened !== null ? (
+        <button onClick={() => onUnlock(opened)} className={sw}>Tovább biometria nélkül</button>
+      ) : (
+        <div className="space-y-2">
+          {mode === "bio" ? <button onClick={() => choose("pin")} className={sw}>PIN megadása</button>
+            : bioOn ? <button onClick={() => choose("bio")} className={sw}>Biometrikus azonosítás</button>
+            : bioAvail ? <button onClick={() => setEnroll((e) => !e)} className={`${sw} ${enroll ? "border-primary text-primary" : ""}`}>{enroll ? "✓ Biometrikus azonosítás bekapcsolása a következő PIN-nel" : "Biometrikus azonosítás bekapcsolása"}</button>
+            : null}
+          {!bioOn && bioAvail && lastErr && <div className="break-words text-center font-mono text-[10px] text-muted-foreground">Legutóbbi bekapcsolási hiba: {lastErr}</div>}
+          <button onClick={() => { if (window.confirm("Kijelentkezel, és a token törlődik erről az eszközről. Utána új tokent és új PIN-t kell megadnod.")) onForgot(); }} className="mx-auto block pt-1 text-xs text-muted-foreground underline">Elfelejtett PIN · kijelentkezés</button>
+        </div>
+      )
+    } title={opened !== null ? "Biometrikus azonosítás bekapcsolása" : mode === "bio" ? "Biometrikus feloldás" : "PIN megadása"} hint={opened === null && mode === "pin" && enroll ? "Add meg a PIN-t, utána bekapcsoljuk a biometrikus azonosítást." : undefined}>
       {opened !== null ? (
         <div className="space-y-3 text-center">
           <div className="text-xs text-muted-foreground">{enrolling ? "Biometrikus kérés folyamatban… Erősítsd meg az ujjlenyomatoddal." : "A PIN rendben van, de a biometria bekapcsolása nem sikerült."}</div>
@@ -163,18 +176,6 @@ export function LockScreen({ onUnlock, onForgot }: { onUnlock: (token: string) =
         <PinPad value={pin} onChange={setPin} disabled={busy || wait > 0} />
       )}
       <div className="min-h-4 break-words text-center font-mono text-xs text-destructive">{wait > 0 ? `Túl sok próbálkozás. Várj ${Math.ceil(wait / 1000)} mp-et.` : err}</div>
-      {opened !== null ? (
-        <button onClick={() => onUnlock(opened)} className={sw}>Tovább biometria nélkül</button>
-      ) : (
-        <div className="space-y-2">
-          {mode === "bio" ? <button onClick={() => choose("pin")} className={sw}>PIN megadása</button>
-            : bioOn ? <button onClick={() => choose("bio")} className={sw}>Biometrikus azonosítás</button>
-            : bioAvail ? <button onClick={() => setEnroll((e) => !e)} className={`${sw} ${enroll ? "border-primary text-primary" : ""}`}>{enroll ? "✓ Biometrikus azonosítás bekapcsolása a következő PIN-nel" : "Biometrikus azonosítás bekapcsolása"}</button>
-            : null}
-          {!bioOn && bioAvail && lastErr && <div className="break-words text-center font-mono text-[10px] text-muted-foreground">Legutóbbi bekapcsolási hiba: {lastErr}</div>}
-          <button onClick={() => { if (window.confirm("Kijelentkezel, és a token törlődik erről az eszközről. Utána új tokent és új PIN-t kell megadnod.")) onForgot(); }} className="mx-auto block pt-1 text-xs text-muted-foreground underline">Elfelejtett PIN · kijelentkezés</button>
-        </div>
-      )}
     </Shell>
   );
 }

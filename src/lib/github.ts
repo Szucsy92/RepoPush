@@ -242,12 +242,12 @@ export class GitHub {
    * Az állapotra szűrt lista (?status=queued) elavult is lehet: egy már megszakadt vagy lefutott futást még sorban állónak
    * mutat („szellem” futás). Ezért a nyitottnak látszó futásokat mindig a futás saját végpontján ellenőrizzük.
    */
-  async runsOverview(repo: string): Promise<{ open: Run[]; closed: RunBrief[] }> {
+  async runsOverview(repo: string, deep = true): Promise<{ open: Run[]; closed: RunBrief[] }> {
     const none = { workflow_runs: [] as any[] };
     const [recent, queued, running] = await Promise.all([
       this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?per_page=30`),
-      this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=queued&per_page=10`).catch(() => none),
-      this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=in_progress&per_page=10`).catch(() => none),
+      deep ? this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=queued&per_page=10`).catch(() => none) : Promise.resolve(none),
+      deep ? this.req<{ workflow_runs: any[] }>(`repos/${repo}/actions/runs?status=in_progress&per_page=10`).catch(() => none) : Promise.resolve(none),
     ]);
     const done = new Map<number, any>();
     const candidates = new Map<number, any>();

@@ -12,6 +12,8 @@ import { RepoPicker } from "@/RepoPicker";
 import { DiffEditor } from "@/DiffEditor";
 import { openRect, readInsets, type Rect } from "@/lib/expand";
 import { Brand } from "@/Brand";
+import { StatusIcon, kindOf, type Kind } from "@/StatusIcon";
+import { pollDelay, errorDelay } from "@/lib/cadence";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
 
@@ -65,10 +67,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const pokeRef = useRef<(() => Promise<void>) | null>(null);
   const actPhases = useRef<Record<string, string>>({});
   const patchFile = useRef<HTMLInputElement>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshedAt, setRefreshedAt] = useState("");
-  const [activeAt, setActiveAt] = useState("");
-  const [activeErr, setActiveErr] = useState("");
   const [drag, setDrag] = useState(false);
   const [expanded, setExpanded] = useState(false); // a diff ablak kinyitva: a képernyő tetejétől a feléig ér
   const [panel, setPanel] = useState<CSSProperties | null>(null); // a diff ablak rögzített téglalapja, amíg nyitva van vagy mozog
@@ -205,11 +203,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inflight: Promise<void> | null = null;
     let errs = 0;
+    let ticks = 0;
+    const t0 = Date.now(); // a repó megnyitása: az első 5 mp-ben másodpercenként nézünk rá
     const body = async () => {
-      let delay = 15000;
+      let delay = 8000;
       if (document.visibilityState === "visible") {
         try {
-          const { open: now, closed } = await gh.runsOverview(repo);
+          const { open: now, closed } = await gh.runsOverview(repo, ticks++ % 6 === 0); // a teljes (szűrt listás) keresés csak minden 6. körben
           if (!alive) return;
           const first_ = first;
           const fresh = now.filter((x) => !tracked.has(x.id) && !panelIds.current.has(x.id));
@@ -237,15 +237,12 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           logPhases(mine, actPhases.current);
           activeRef.current = mine;
           setActive(mine);
-          setActiveAt(new Date().toLocaleTimeString());
           errs = 0;
-          setActiveErr("");
-          if (mine.length) delay = 8000;
-        } catch (e: any) {
-          // Ne maradjon csendben elavult állapot: a hiba látszik az Action fülön, és ritkábban próbálkozunk.
+          // Minél gyorsabban látszódjon az állapot: indulás után 1 mp, futás közben 5 mp, egyébként 8 mp.
+          delay = pollDelay({ sinceOpenMs: Date.now() - t0, anyOpen: now.length > 0 || buildingRef.current });
+        } catch {
           errs++;
-          setActiveErr(e?.message ?? String(e));
-          delay = errs > 2 ? 30000 : 15000;
+          delay = errorDelay(errs);
         }
       }
       if (alive) timer = setTimeout(tick, delay);
@@ -325,7 +322,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         fails++;
         if (fails === 1 || fails % 10 === 0) add(`Build állapot hiba: ${e.message}`);
       } finally { running = false; }
-      if (!stop) timer = setTimeout(tick, fails ? Math.min(4000 * 2 ** Math.min(fails, 3), 30000) : 4000);
+      if (!stop) timer = setTimeout(tick, fails ? Math.min(2000 * 2 ** Math.min(fails, 4), 30000) : pollDelay({ sinceOpenMs: Date.now() - t0, anyOpen: true }));
     };
     // Visszalépéskor azonnal újra lekérdez (a háttérben az időzítők lassulnak).
     const wake = () => { if (document.visibilityState === "visible") { if (timer) clearTimeout(timer); tick(); } };
@@ -350,18 +347,11 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     });
   }
 
-  // Kézi frissítés: release, futó action és (ha követünk buildet) a build állapota is. Látható visszajelzéssel.
-  async function refresh() {
-    if (refreshing) return;
-    setRefreshing(true);
+  // Kézi frissítés: azonnal lekérdez mindent (release, futó actionök, build állapota). Külön kijelzése nincs.
+  function refresh() {
     setRelTick((n) => n + 1);
     setPollTick((n) => n + 1);
-    try {
-      await Promise.all([pokeRef.current?.(), new Promise((r) => setTimeout(r, 700))]);
-    } finally {
-      setRefreshedAt(new Date().toLocaleTimeString());
-      setRefreshing(false);
-    }
+    void pokeRef.current?.();
   }
 
   async function build() {
@@ -553,7 +543,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     }
   }
 
-  const sum = stateSummary({ stage, step, pct, runs: allRuns, building, hasRepo: !!repo, err: activeErr });
+  const sum = stateSummary({ stage, step, pct, runs: allRuns, building, hasRepo: !!repo });
 
   return (
     <>
@@ -592,7 +582,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
 
       <div className="land-grid mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col gap-2 px-3 pb-3 pt-1">
         <div className="land-col">
-        <div className="seg flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
+        <div className="seg seg-tabs flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
           {(["zip", "patch"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded-xl px-2 py-2 font-semibold ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
               {t === "zip" ? "ZIP" : "Patch / Diff"}
@@ -617,7 +607,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 </button>
               )}
             </label>
-            <div className="seg flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
+            <div className="seg seg-mode flex gap-1 rounded-xl border border-border bg-card p-1 font-mono text-xs">
               <button onClick={() => setMode("replace")} title="Ami nincs a ZIP-ben, törlődik" className={`flex-1 rounded-xl px-2 py-2 font-semibold ${mode === "replace" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Teljes csere</button>
               <button onClick={() => setMode("merge")} title="A többi fájl marad" className={`flex-1 rounded-xl px-2 py-2 font-semibold ${mode === "merge" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Beillesztés</button>
             </div>
@@ -655,14 +645,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               </div>
             </div>
             {targets.length > 0 && (
-              <div className="truncate font-mono text-xs text-muted-foreground">
+              <div className="land-targets truncate font-mono text-xs text-muted-foreground">
                 {targets.length} fájl: {targets.map((t) => t.newPath ?? t.oldPath).join(", ")}
               </div>
             )}
           </>
         )}
 
-        <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit üzenet (opcionális)" className="field text-xs" />
+        <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit üzenet (opcionális)" className="field land-commit text-xs" />
         <button disabled={busy || !repo} onClick={run} data-haptic="medium" className="act truncate rounded-xl bg-primary px-3 py-2.5 font-mono text-sm font-bold text-primary-foreground disabled:opacity-40">
           {busy ? "Folyamatban…" : repo ? `Végrehajtás → ${branch}` : "Válassz repót"}
         </button>
@@ -672,10 +662,10 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           <div className="shrink-0 space-y-1 rounded-xl border border-border bg-card p-1.5 font-mono text-[11px]">
             <div className="flex items-center gap-1">
               <div className="flex-1 truncate text-muted-foreground">Utolsó APK elérhető: {release.name} · {stamp(release.published)}</div>
-              <button onClick={() => { markSeen(repo, release.id); setSeenId(release.id); }} className="rounded border border-border px-1.5 py-0.5">elrejt</button>
+              <button onClick={() => { markSeen(repo, release.id); setSeenId(release.id); }} className="rounded-full border border-border px-2.5 py-1">elrejt</button>
             </div>
             {release.assets.map((a) => (
-              <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer" onClick={() => { markSeen(repo, release.id); setTimeout(() => setSeenId(release.id), 400); }} className="flex items-center gap-1 rounded bg-secondary px-2 py-1.5 text-secondary-foreground">
+              <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer" onClick={() => { markSeen(repo, release.id); setTimeout(() => setSeenId(release.id), 400); }} className="flex items-center gap-1 rounded-xl bg-secondary px-3 py-1.5 text-secondary-foreground">
                 <span>⬇</span><span className="flex-1 truncate">{a.name}</span><span className="text-muted-foreground">{a.size >= 1048576 ? (a.size / 1048576).toFixed(1) + " MB" : Math.ceil(a.size / 1024) + " KB"}</span>
               </a>
             ))}
@@ -684,60 +674,64 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         <div ref={cardRef} className="flex min-h-[9rem] flex-[5] flex-col overflow-hidden rounded-xl border border-border bg-card">
         {/* One state strip for the whole area: the upload, or what the actions are doing (started here or elsewhere).
             Tap it for the details. The button is Build, or Stop (everything) while something runs. */}
-        <div ref={stripRef} className="relative flex shrink-0 gap-1 border-b border-border p-1 font-mono text-[11px]">
+        <div ref={stripRef} className="relative flex shrink-0 gap-1.5 border-b border-border p-1.5 font-mono text-[11px]">
           <div ref={ddRef} className="min-w-0 flex-1">
-            <button onClick={() => setDdOpen((o) => !o)} aria-expanded={ddOpen} className="flex w-full items-center gap-1 rounded border border-border px-2 py-1.5 text-left">
-              <span className={sum.dot}>●</span>
+            <button onClick={() => setDdOpen((o) => !o)} aria-expanded={ddOpen} className="flex w-full items-center gap-2 rounded-xl border border-border px-3 py-1.5 text-left">
+              <StatusIcon kind={sum.kind} />
               <span className="min-w-0 flex-1 truncate">{sum.text}</span>
               <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${ddOpen ? "rotate-180" : ""}`} />
             </button>
             {ddOpen && (
-              <div style={{ maxHeight: ddMax }} className="absolute left-1 right-1 top-full z-10 mt-0.5 space-y-1 overflow-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl">
-                <div className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
-                  <div className="min-w-0 flex-1">
-                    {activeAt ? `Frissítve: ${activeAt} · 8 mp-enként magától is` : "Még nem frissült"}
-                    {activeErr && <div className="text-yellow-300">⚠ A frissítés most nem sikerül ({activeErr}), az állapot elavult lehet.</div>}
-                  </div>
-                  <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} className="shrink-0 rounded border border-border px-2 py-0.5">{isNative() ? "⧉ napló" : "⇩ napló"}</button>
+              <div style={{ maxHeight: ddMax }} className="absolute left-1.5 right-1.5 top-full z-10 mt-1 space-y-1.5 overflow-auto rounded-2xl border border-border bg-popover p-2 shadow-xl">
+                <div className="flex justify-end">
+                  <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} className="rounded-full border border-border px-3 py-1 text-[10px]">{isNative() ? "⧉ napló" : "⇩ napló"}</button>
                 </div>
                 {allRuns.map((x) => (
-                    <div key={x.id} className="space-y-0.5">
-                      <div className="flex items-center gap-1">
-                        <span className={dot(x.status, x.conclusion)}>●</span>
-                        <a href={x.url} target="_blank" rel="noreferrer" className="flex-1 truncate underline">{x.name} <span className="text-muted-foreground">({x.event})</span></a>
-                        <span className="text-muted-foreground">{x.conclusion ?? x.status}</span>
-                        {x.status === "completed" && <a href={logZip(x)} target="_blank" rel="noreferrer" className={`rounded border px-1.5 ${x.conclusion === "failure" ? "border-destructive text-destructive" : "border-border"}`}>⇩ log ZIP</a>}
-                        {x.status === "completed" && <button onClick={() => { details(x); setDdOpen(false); }} className="rounded border border-border px-1.5">részletek</button>}
-                        {x.status !== "completed" && <button onClick={() => stopActive(x, !!stopReq[x.id] && Date.now() - stopReq[x.id]! > 15000)} disabled={!!stopReq[x.id] && Date.now() - stopReq[x.id]! <= 15000} className="rounded border border-destructive/60 px-1.5 text-destructive disabled:opacity-60">{stopReq[x.id] ? (Date.now() - stopReq[x.id]! > 15000 ? "kényszerít" : "leáll…") : "■ leállít"}</button>}
-                      </div>
-                      {x.jobs.map((j) => (
-                        <div key={j.name} className="pl-3 text-muted-foreground">
-                          <span className={dot(j.status, j.conclusion)}>●</span> {j.status === "completed" && j.conclusion === "failure" ? <a href={j.url} target="_blank" rel="noreferrer" className="underline">{j.name} (napló)</a> : j.name}
-                          {j.status !== "completed" && j.steps.find((s: { status: string }) => s.status === "in_progress") && <> · {j.steps.find((s: { status: string }) => s.status === "in_progress")!.name}</>}
-                          {j.steps.length > 0 && <> · {j.steps.filter((s: { status: string }) => s.status === "completed").length}/{j.steps.length}</>}
-                        </div>
-                      ))}
+                  <div key={x.id} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <StatusIcon kind={kindOf(x.status, x.conclusion)} />
+                      <a href={x.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate underline">{x.name} <span className="text-muted-foreground">({x.event})</span></a>
+                      <span className="shrink-0 text-muted-foreground">{x.conclusion ?? x.status}</span>
+                      {x.status === "completed" && <a href={logZip(x)} target="_blank" rel="noreferrer" className={`shrink-0 rounded-full border px-2.5 py-0.5 ${x.conclusion === "failure" ? "border-destructive text-destructive" : "border-border"}`}>⇩ log ZIP</a>}
+                      {x.status === "completed" && <button onClick={() => { details(x); setDdOpen(false); }} className="shrink-0 rounded-full border border-border px-2.5 py-0.5">részletek</button>}
+                      {x.status !== "completed" && <button onClick={() => stopActive(x, !!stopReq[x.id] && Date.now() - stopReq[x.id]! > 15000)} disabled={!!stopReq[x.id] && Date.now() - stopReq[x.id]! <= 15000} className="shrink-0 rounded-full border border-destructive/60 px-2.5 py-0.5 text-destructive disabled:opacity-60">{stopReq[x.id] ? (Date.now() - stopReq[x.id]! > 15000 ? "kényszerít" : "leáll…") : "■ leállít"}</button>}
                     </div>
-                  ))}
+                    {x.jobs.map((j) => (
+                      <div key={j.name} className="space-y-0.5 pl-6 text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <StatusIcon kind={kindOf(j.status, j.conclusion)} className="h-4 w-4" />
+                          <span className="min-w-0 flex-1 truncate">{j.status === "completed" && j.conclusion === "failure" ? <a href={j.url} target="_blank" rel="noreferrer" className="underline">{j.name} (napló)</a> : j.name}</span>
+                          {j.steps.length > 0 && <span className="shrink-0">{j.steps.filter((st) => st.status === "completed").length}/{j.steps.length}</span>}
+                        </div>
+                        {j.status !== "completed" && j.steps.map((st, i) => (
+                          <div key={i} className="flex items-center gap-2 pl-6">
+                            <StatusIcon kind={kindOf(st.status, st.conclusion)} className="h-3.5 w-3.5" />
+                            <span className={`min-w-0 flex-1 truncate ${st.status === "in_progress" ? "text-foreground" : ""}`}>{st.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ))}
                 {!allRuns.length && <div className={`text-muted-foreground ${building ? "animate-pulse" : ""}`}>{building ? "Várakozás a GitHubra…" : "Nincs követett futás."}</div>}
               </div>
             )}
           </div>
-          <button onClick={refresh} disabled={refreshing} title={refreshedAt ? `Állapot frissítése · utoljára: ${refreshedAt}` : "Állapot frissítése"} aria-label="Állapot frissítése" className="flex shrink-0 items-center justify-center rounded border border-border px-2 py-1.5 disabled:opacity-70">
-            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin text-primary" : ""}`} />
+          <button onClick={refresh} title="Állapot frissítése" aria-label="Állapot frissítése" className="flex shrink-0 items-center justify-center rounded-xl border border-border px-2.5 py-1.5">
+            <RefreshCw className="h-4 w-4" />
           </button>
           <button
             disabled={(!running && !repo) || (running && stopping && !forceReady)}
             onClick={running ? stopBuild : build}
             data-haptic="medium"
             title={running ? (stopping && forceReady ? "Kényszerített leállítás (force-cancel)" : "Az összes futó action leállítása") : "Friss build indítása"}
-            className={`shrink-0 rounded px-2 py-1.5 font-bold disabled:opacity-60 ${running ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground"}`}
+            className={`shrink-0 rounded-xl px-3 py-1.5 font-bold disabled:opacity-60 ${running ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground"}`}
           >
             {!running ? (runs.length ? "Új build" : "▶ Build") : !stopping ? (openAll.length ? "■ Leállítás" : "Mégse") : forceReady ? "Kényszerítés" : "Leállítás…"}
           </button>
           {sum.progress && (
-            <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="absolute inset-x-1 bottom-0 h-0.5 overflow-hidden rounded bg-border/40">
-              <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+            <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="absolute inset-x-1.5 bottom-0 h-0.5 overflow-hidden rounded-full bg-border/40">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
           )}
         </div>
@@ -757,19 +751,20 @@ function stamp(iso: string): string {
   return new Date(iso).toLocaleString("hu-HU", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+type Summary = { kind: Kind; text: string };
+
 // One line for the whole bottom area: the upload while it runs, otherwise what the actions (started here or elsewhere) are doing.
-function stateSummary(o: { stage: number; step: string; pct: number; runs: Run[]; building: boolean; hasRepo: boolean; err: string }): { dot: string; text: string; progress: boolean } {
-  if (!o.hasRepo) return { dot: "text-muted-foreground", text: "Válassz repót", progress: false };
-  if (o.stage === 1 || o.stage === 2) return { dot: "text-primary animate-pulse", text: `${o.stage === 1 ? "Start" : "Process"} · ${o.step} · ${o.pct}%`, progress: true };
-  if (o.stage === -1) return { dot: "text-destructive", text: `Hiba · ${o.step}`, progress: false };
-  if (!o.runs.length && !o.building && o.stage === 3) return { dot: "text-ok", text: "✔ Feltöltve · nincs futó action", progress: false };
-  const b = buildSummary(o.runs, o.building);
-  return { ...b, text: (o.err ? "⚠ " : "") + b.text, progress: false };
+function stateSummary(o: { stage: number; step: string; pct: number; runs: Run[]; building: boolean; hasRepo: boolean }): Summary & { progress: boolean } {
+  if (!o.hasRepo) return { kind: "idle", text: "Válassz repót", progress: false };
+  if (o.stage === 1 || o.stage === 2) return { kind: "running", text: `${o.stage === 1 ? "Start" : "Process"} · ${o.step} · ${o.pct}%`, progress: true };
+  if (o.stage === -1) return { kind: "failure", text: `Hiba · ${o.step}`, progress: false };
+  if (!o.runs.length && !o.building && o.stage === 3) return { kind: "success", text: "Feltöltve · nincs futó action", progress: false };
+  return { ...buildSummary(o.runs, o.building), progress: false };
 }
 
-// The one-line state of the tracked build: what runs right now, otherwise how it ended.
-function buildSummary(runs: Run[], building: boolean): { dot: string; text: string } {
-  if (!runs.length) return building ? { dot: "text-primary animate-pulse", text: "Várakozás a GitHubra…" } : { dot: "text-muted-foreground", text: "Nincs futó action" };
+// What the actions do right now: the running step, otherwise how they ended.
+function buildSummary(runs: Run[], building: boolean): Summary {
+  if (!runs.length) return building ? { kind: "running", text: "Várakozás a GitHubra…" } : { kind: "idle", text: "Nincs futó action" };
   const running = runs.filter((r) => r.status !== "completed");
   if (running.length) {
     const r = running[0]!;
@@ -777,16 +772,10 @@ function buildSummary(runs: Run[], building: boolean): { dot: string; text: stri
     const step = j?.steps.find((x) => x.status === "in_progress");
     const done = j ? j.steps.filter((x) => x.status === "completed").length : 0;
     const where = [r.name, j && j.name !== r.name ? j.name : "", step?.name ?? (j ? "várakozás" : r.status === "queued" ? "sorban áll" : r.status === "pending" ? "előző futásra vár" : "")].filter(Boolean).join(" · ");
-    return { dot: "text-primary animate-pulse", text: `${where}${j?.steps.length ? ` (${done}/${j.steps.length})` : ""}${running.length > 1 ? ` +${running.length - 1}` : ""}` };
+    return { kind: kindOf(r.status, r.conclusion), text: `${where}${j?.steps.length ? ` (${done}/${j.steps.length})` : ""}${running.length > 1 ? ` +${running.length - 1}` : ""}` };
   }
   const bad = runs.filter((r) => r.conclusion && !["success", "skipped", "cancelled"].includes(r.conclusion));
-  if (bad.length) return { dot: "text-destructive", text: `✖ ${bad[0]!.name}: ${bad[0]!.conclusion}${bad.length > 1 ? ` +${bad.length - 1}` : ""}` };
-  return { dot: "text-ok", text: `✔ Kész · ${runs.length} futás` };
+  if (bad.length) return { kind: "failure", text: `${bad[0]!.name}: ${bad[0]!.conclusion}${bad.length > 1 ? ` +${bad.length - 1}` : ""}` };
+  return { kind: "success", text: `Kész · ${runs.length} futás` };
 }
-
-function dot(s: string, c: string | null) {
-  if (s !== "completed") return "text-primary animate-pulse";
-  return c === "success" ? "text-ok" : c === "skipped" || c === "cancelled" ? "text-muted-foreground" : "text-destructive";
-}
-
 function safe<T>(f: () => T, d: T): T { try { return f(); } catch { return d; } }

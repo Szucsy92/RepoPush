@@ -179,9 +179,14 @@ export class GitHub {
     };
     await Promise.all(Array.from({ length: 8 }, worker));
     if (d.mode === "merge") for (const f of d.files.filter((f) => f.delete)) tree.push({ path: f.path, mode: "100644", type: "blob", sha: null });
-    const newTree = await this.req<{ sha: string }>(`repos/${repo}/git/trees`, {
-      method: "POST", body: JSON.stringify(d.mode === "merge" && base.tree ? { base_tree: base.tree, tree } : { tree }),
-    });
+    // Nincs mit írni (a tartalom már így van a repóban, vagy üres a módosításlista): a fa ugyanaz marad, így üres commit készül,
+    // ami a push-ra figyelő workflow-kat újra elindítja. Az ismétlés tehát mindig végrehajtható.
+    if (!tree.length && !(d.mode === "merge" && base.tree)) throw new GitHubError("Nincs mit commitolni: üres a módosításlista és a repó is.", 0);
+    const newTree = !tree.length
+      ? { sha: base.tree as string }
+      : await this.req<{ sha: string }>(`repos/${repo}/git/trees`, {
+          method: "POST", body: JSON.stringify(d.mode === "merge" && base.tree ? { base_tree: base.tree, tree } : { tree }),
+        });
     const commit = await this.req<{ sha: string }>(`repos/${repo}/git/commits`, {
       method: "POST", body: JSON.stringify({ message: d.message, tree: newTree.sha, parents: [base.parent] }),
     });
@@ -191,7 +196,7 @@ export class GitHub {
       if (!(e instanceof GitHubError) || e.status !== 422) throw e;
       await this.req(`repos/${repo}/git/refs`, { method: "POST", body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }) });
     }
-    return { sha: commit.sha, url: `https://github.com/${repo}/commit/${commit.sha}`, count: d.files.length };
+    return { sha: commit.sha, url: `https://github.com/${repo}/commit/${commit.sha}`, count: d.files.length, empty: !!base.tree && newTree.sha === base.tree };
   }
 
   async startBuild(repo: string, branch: string) {

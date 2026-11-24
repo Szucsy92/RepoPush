@@ -483,11 +483,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         const { files: remote, truncated } = await gh.getTree(repo, branch);
         if (truncated && mode === "replace") throw new Error("A repó túl nagy a teljes összevetéshez (a GitHub csonkolta a fájllistát), ezért teljes cserét nem végzek. Használd a Beillesztés módot.");
         const plan = await planZip(zipFiles, remote, mode);
-        if (!plan.added.length && !plan.modified.length && !plan.deleted.length) {
-          add("Nincs változás: a ZIP megegyezik a repó jelenlegi állapotával, nem készült commit.");
-          setStage(3); setPct(100); setStep("Nincs változás");
-          return;
-        }
+        // Ami már pontosan így van a repóban, azt is be lehet tenni újra: üres commit készül, ami újraindítja a push-ra figyelő workflow-kat.
+        if (!plan.added.length && !plan.modified.length && !plan.deleted.length) add("Nincs tartalmi változás: a ZIP megegyezik a repó jelenlegi állapotával. Üres commit készül.");
         if (!(await ask(plan))) throw new Error("Megszakítva.");
         setStage(2);
         // Unchanged files keep their existing blob: no need to upload them again.
@@ -505,7 +502,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         setStep("Commit létrehozása és ág frissítése");
         add("Commit létrehozása…");
         const r = await gh.commitFiles({ repo, branch, mode, message: message || `Upload ${zipName}`, files: done });
-        add(`FINISH ✔ ${r.count} fájl · ${r.url}`);
+        add(r.empty ? `FINISH ✔ üres commit (nincs tartalmi változás) · ${r.url}` : `FINISH ✔ ${r.count} fájl · ${r.url}`);
       } else {
         const t = patchTargets(patch);
         if (!t.length) throw new Error("A patch nem tartalmaz fájlt.");
@@ -514,14 +511,10 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         add(`Patch: ${t.length} fájl, eredeti tartalom letöltése…`);
         const src = await gh.getFiles(repo, branch, paths);
         const { ops, errors, skipped } = applyPatchText(patch, src);
-        skipped.forEach((f) => add(`  = ${f}: már alkalmazva, kihagyva`));
+        skipped.forEach((f) => add(`  = ${f}: már így van a repóban, nincs mit módosítani`));
         errors.forEach((e) => add(e));
         if (errors.length) throw new Error("A patch nem minden része illeszthető, semmi sem lett feltöltve.");
-        if (!ops.length) {
-          add("Ez a diff már alkalmazva van a repón (nincs mit feltölteni), nem készült commit.");
-          setStage(3); setPct(100); setStep("Már alkalmazva");
-          return;
-        }
+        if (!ops.length) add("Nincs tartalmi változás: a diff már alkalmazva van. Üres commit készül.");
         ops.forEach((o) => add(`  ${o.delete ? "−" : "~"} ${o.path}`));
         const pl: Plan = { added: [], modified: [], deleted: [], unchanged: 0 };
         ops.forEach((o) => (o.delete ? pl.deleted : src[o.path] == null ? pl.added : pl.modified).push(o.path));
@@ -531,7 +524,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           repo, branch, mode: "merge", message: message || "Apply patch",
           files: ops.map((o) => (o.delete ? { path: o.path, delete: true } : { path: o.path, base64: toBase64(o.content ?? "") })),
         });
-        add(`FINISH ✔ ${r.count} módosítás · ${r.url}`);
+        add(r.empty ? `FINISH ✔ üres commit (nincs tartalmi változás) · ${r.url}` : `FINISH ✔ ${r.count} módosítás · ${r.url}`);
       }
       setStage(3); setPct(100); setStep("Kész");
       setTimeout(() => pokeRef.current?.(), 5000);

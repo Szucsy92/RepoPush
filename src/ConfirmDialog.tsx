@@ -5,7 +5,7 @@ export function ConfirmDialog({ plan, repo, branch, mode, onOk, onCancel }: {
 }) {
   const list = (t: string, xs: string[], cls: string) => xs.length > 0 && (
     <details className="text-xs"><summary className={cls}>{t}: {xs.length}</summary>
-      <div className="max-h-28 overflow-auto pl-3 font-mono text-[10px] text-muted-foreground">{xs.map((x) => <div key={x}>{x}</div>)}</div>
+      <div className="max-h-28 overflow-auto pl-3 font-mono text-[10px] text-muted-foreground">{xs.map((x) => <div key={x} className="break-all">{x}</div>)}</div>
     </details>
   );
   const nothing = !plan.added.length && !plan.modified.length && !plan.deleted.length;

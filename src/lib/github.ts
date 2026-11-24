@@ -190,11 +190,24 @@ export class GitHub {
     const commit = await this.req<{ sha: string }>(`repos/${repo}/git/commits`, {
       method: "POST", body: JSON.stringify({ message: d.message, tree: newTree.sha, parents: [base.parent] }),
     });
+    const moveRef = async () => {
+      try {
+        await this.req(`repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, { method: "PATCH", body: JSON.stringify({ sha: commit.sha, force: true }) });
+      } catch (e) {
+        if (!(e instanceof GitHubError) || e.status !== 422) throw e;
+        await this.req(`repos/${repo}/git/refs`, { method: "POST", body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }) });
+      }
+    };
     try {
-      await this.req(`repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, { method: "PATCH", body: JSON.stringify({ sha: commit.sha, force: true }) });
+      await moveRef();
     } catch (e) {
-      if (!(e instanceof GitHubError) || e.status !== 422) throw e;
-      await this.req(`repos/${repo}/git/refs`, { method: "POST", body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }) });
+      // A kapcsolat megszakadhat, miután a GitHub már végrehajtotta a kérést (a válasz nem érkezik meg, „Failed to fetch”):
+      // ha az ág már az új commitra mutat, a feltöltés sikerült, és nem szabad hibát jelezni.
+      const lostReply = !(e instanceof GitHubError) || e.status === 0 || e.status >= 500;
+      if (!lostReply) throw e;
+      await new Promise((r) => setTimeout(r, 1500));
+      const now = await this.req<{ object: { sha: string } }>(`repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`).then((x) => x.object.sha, () => null);
+      if (now !== commit.sha) throw e;
     }
     return { sha: commit.sha, url: `https://github.com/${repo}/commit/${commit.sha}`, count: d.files.length, empty: !!base.tree && newTree.sha === base.tree };
   }

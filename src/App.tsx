@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, Download, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
+import { ChevronDown, Copy, Download, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
@@ -529,8 +529,13 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
       setStage(3); setPct(100); setStep("Kész");
       setTimeout(() => pokeRef.current?.(), 5000);
     } catch (e: any) {
-      add(`HIBA ✖ ${e.message ?? e}`);
-      setStage(-1); setStep("Megszakadt");
+      if (e?.message === "Megszakítva.") {
+        add("Megszakítva.");
+        setStage(0); setStep("");
+      } else {
+        add(`HIBA ✖ ${e.message ?? e}`);
+        setStage(-1); setStep(String(e?.message ?? "Megszakadt"));
+      }
     } finally {
       setBusy(false);
     }
@@ -592,7 +597,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               className={`win relative flex min-h-[6.5rem] flex-[2] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-3 text-center ${drag ? "border-primary bg-accent" : "border-border bg-card"}`}
             >
               <input type="file" accept=".zip,.patch,.diff" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; onZip(f); }} />
-              <div className="truncate font-mono text-sm">{zipName || "ZIP behúzása / tallózás"}</div>
+              <div className="max-w-full break-all font-mono text-sm">{zipName || "ZIP behúzása / tallózás"}</div>
               <div className="text-xs text-muted-foreground">{zipFiles.length ? `${zipFiles.length} fájl` : "letöltött repó szerkezet"}</div>
               {zipName && (
                 <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearZip(); }} title="Törlés" aria-label="Törlés" className="absolute bottom-2.5 right-2.5 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
@@ -638,7 +643,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               </div>
             </div>
             {targets.length > 0 && (
-              <div className="land-targets truncate font-mono text-xs text-muted-foreground">
+              <div className="land-targets max-h-[4.5rem] overflow-y-auto break-all font-mono text-xs text-muted-foreground">
                 {targets.length} fájl: {targets.map((t) => t.newPath ?? t.oldPath).join(", ")}
               </div>
             )}
@@ -675,10 +680,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${ddOpen ? "rotate-180" : ""}`} />
             </button>
             {ddOpen && (
-              <div style={{ maxHeight: ddMax }} className="absolute left-1.5 right-1.5 top-full z-10 mt-1 space-y-1.5 overflow-auto rounded-2xl border border-border bg-popover p-2 shadow-xl">
-                <div className="flex justify-end">
-                  <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} className="rounded-full border border-border px-3 py-1 text-[10px]">{isNative() ? "⧉ napló" : "⇩ napló"}</button>
-                </div>
+              <div style={{ maxHeight: ddMax }} className="absolute left-1.5 right-1.5 top-full z-10 mt-1 space-y-1.5 overflow-auto rounded-2xl border border-border bg-background/95 p-2 shadow-xl backdrop-blur-md">
                 {allRuns.map((x) => (
                   <div key={x.id} className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -707,6 +709,12 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                   </div>
                 ))}
                 {!allRuns.length && <div className={`text-muted-foreground ${building ? "animate-pulse" : ""}`}>{building ? "Várakozás a GitHubra…" : "Nincs követett futás."}</div>}
+                {/* Napló másolása: lebegő gomb a panel jobb alsó sarkában, nem foglal helyet a futások listájától. */}
+                <div className="sticky bottom-0 z-10 h-0">
+                  <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} aria-label={isNative() ? "Napló másolása" : "Napló mentése"} className="absolute bottom-1 right-0 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background/90 text-muted-foreground shadow-lg backdrop-blur-md">
+                    {isNative() ? <Copy className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -750,7 +758,9 @@ type Summary = { kind: Kind; text: string };
 function stateSummary(o: { stage: number; step: string; pct: number; runs: Run[]; building: boolean; hasRepo: boolean }): Summary & { progress: boolean } {
   if (!o.hasRepo) return { kind: "idle", text: "Válassz repót", progress: false };
   if (o.stage === 1 || o.stage === 2) return { kind: "running", text: `${o.stage === 1 ? "Start" : "Process"} · ${o.step} · ${o.pct}%`, progress: true };
-  if (o.stage === -1) return { kind: "failure", text: `Hiba · ${o.step}`, progress: false };
+  // A régi hiba nem takarhatja el azt, ami most fut (például a megszakadt feltöltés ellenére elindult build).
+  const busy = o.building || o.runs.some((r) => r.status !== "completed");
+  if (o.stage === -1 && !busy) return { kind: "failure", text: `Hiba · ${o.step}`, progress: false };
   if (!o.runs.length && !o.building && o.stage === 3) return { kind: "success", text: "Feltöltve · nincs futó action", progress: false };
   return { ...buildSummary(o.runs, o.building), progress: false };
 }

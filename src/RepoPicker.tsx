@@ -120,7 +120,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
         window.clearTimeout(timer);
         // Make the list follow the finger: dragging down moves the content down,
         // and dragging up moves it up.
-        el.scrollTop -= deltaY;
+        el.scrollTop += deltaY;
         sy = t.clientY;
         sx = t.clientX;
       }

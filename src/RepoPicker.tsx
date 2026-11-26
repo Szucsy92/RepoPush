@@ -105,7 +105,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     };
     const onMove = (e: TouchEvent) => {
       const t = e.touches[0]!;
-      if (st.name) { // dragging a row to a new place: the list itself does not scroll
+      if (st.name) { // dragging a starred row to reorder it
         e.preventDefault();
         st.lastY = t.clientY;
         const box = el.getBoundingClientRect();
@@ -114,10 +114,19 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
         if (st.scrollV && !st.raf) st.raf = requestAnimationFrame(autoScroll);
         return;
       }
-      if (Math.hypot(t.clientX - sx, t.clientY - sy) > 8) window.clearTimeout(timer); // scrolling, not a long press
+      const deltaY = t.clientY - sy;
+      if (Math.hypot(t.clientX - sx, deltaY) > 8) {
+        e.preventDefault();
+        window.clearTimeout(timer);
+        // Make the list follow the finger: dragging down moves the content down,
+        // and dragging up moves it up.
+        el.scrollTop -= deltaY;
+        sy = t.clientY;
+        sx = t.clientX;
+      }
       setPop(rowAt(t.clientX, t.clientY)?.dataset.repo ?? "");
     };
-    const onEnd = () => {
+    const onEnd = (e: TouchEvent) => {
       window.clearTimeout(timer);
       if (st.name) {
         const row = rowOf(st.name);
@@ -129,6 +138,20 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
         tap("light");
         suppressClick.current = true; // the lift-off must not count as a tap on the repo
         window.setTimeout(() => { suppressClick.current = false; }, 350);
+      } else if (e.type === "touchend" && !latest.current.searching) {
+        // Pick the repo under the finger after the scroll gesture has finished.
+        const t = e.changedTouches[0];
+        const target = t ? document.elementFromPoint(t.clientX, t.clientY) : null;
+        const row = target?.closest<HTMLElement>("[data-repo]") ?? null;
+        if (row && !target?.closest('button[aria-label="Csillag levétele"], button[aria-label="Csillagozás"]')) {
+          const option = row.querySelector<HTMLButtonElement>('[role="option"]');
+          if (option) {
+            suppressClick.current = true;
+            onChange(row.dataset.repo ?? "");
+            setOpen(false);
+            window.setTimeout(() => { suppressClick.current = false; }, 350);
+          }
+        }
       }
       window.setTimeout(() => setFocus(""), 140);
     };
@@ -198,7 +221,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Keresés…" aria-label="Repó keresése" className="min-w-0 flex-1 bg-transparent font-mono text-base text-primary outline-none placeholder:text-primary/60" />
             </div>
           )}
-          <div ref={list} role="listbox" aria-label="Repók" onContextMenu={(e) => e.preventDefault()} className="relative max-h-[min(66vh,30rem)] overflow-x-hidden overflow-y-auto overscroll-contain p-1.5">
+          <div ref={list} role="listbox" aria-label="Repók" onContextMenu={(e) => e.preventDefault()} className="relative max-h-[min(66vh,30rem)] touch-none overflow-x-hidden overflow-y-auto overscroll-contain p-1.5">
             <ul>
               {starredShown.map((r) => row(r, true))}
               {restShown.map((r) => row(r, false))}

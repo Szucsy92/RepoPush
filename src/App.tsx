@@ -13,6 +13,7 @@ import { DiffEditor } from "@/DiffEditor";
 import { openRect, readInsets, type Rect } from "@/lib/expand";
 import { Brand } from "@/Brand";
 import { StatusIcon, kindOf, type Kind } from "@/StatusIcon";
+import { LogLines } from "@/LogLines";
 import { pollDelay, errorDelay } from "@/lib/cadence";
 import { ConfirmDialog } from "@/ConfirmDialog";
 
@@ -223,7 +224,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             const done = await gh.getRuns(repo, gone.map((x) => x.id)).catch(() => []);
             if (!alive) return;
             logPhases(done, actPhases.current);
-            add(`ACTION KÉSZ: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
+            add(`ACTION KÉSZ ${done.length ? outcome(done.map((x) => x.conclusion)) : "■"}: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
             gone.forEach((x) => { tracked.delete(x.id); seenDone.add(x.id); });
             setRelTick((n) => n + 1);
           }
@@ -272,6 +273,16 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const targets = useMemo(() => (tab === "patch" && patch.trim() ? safe(() => patchTargets(patch), []) : []), [patch, tab]);
 
   function clearZip() { setZipFiles([]); setZipName(""); }
+  // A commit üzenet, a ZIP és a diff kiürül a sikeres végrehajtás után, és ha másik repót választunk.
+  function resetInputs() {
+    setMessage(""); setZipFiles([]); setZipName(""); setPatch("");
+    setExpanded(false); setPanel(null); setBig(false); closing.current = false;
+  }
+  const prevRepo = useRef("");
+  useEffect(() => {
+    if (prevRepo.current && prevRepo.current !== repo) resetInputs();
+    prevRepo.current = repo;
+  }, [repo]);
 
   async function onZip(f: File | undefined) {
     if (!f) return;
@@ -314,7 +325,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           if (open.length) { cancelWanted.current = false; void cancelOpen(open, false); }
         }
         const done = r.length > 0 && r.every((x) => x.status === "completed");
-        if (done) { setBuilding(false); add(`BUILD KÉSZ: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); setRelTick((n) => n + 1); return; }
+        if (done) { setBuilding(false); add(`BUILD KÉSZ ${outcome(r.map((x) => x.conclusion))}: ${r.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`); setRelTick((n) => n + 1); return; }
         // Ne ragadjon be: ha 2 percig nem indult futás, vagy 45 percnél tovább tart, feladjuk a várakozást.
         if (!r.length && Date.now() - t0 > 120000) { setBuilding(false); add("Nem indult build ebben a 2 percben. Nézd meg az Actions oldalt, vagy indíts újat."); return; }
         if (Date.now() - t0 > 45 * 60000) { setBuilding(false); add("A build követése időtúllépés miatt leállt (45 perc). A ↻ gombbal újra lekérdezheted."); return; }
@@ -336,7 +347,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const note = (k: string, v: string, line: string) => { if (ph[k] !== v) { ph[k] = v; add(line); } };
     rs.forEach((x) => {
       const st = x.conclusion ?? x.status;
-      note(`r${x.id}`, st, `${x.name}: ${st === "queued" ? "sorban áll" : st === "in_progress" ? "fut" : st}`);
+      note(`r${x.id}`, st, `${x.status === "completed" ? `${outcome([x.conclusion])} ` : ""}${x.name}: ${st === "queued" ? "sorban áll" : st === "in_progress" ? "fut" : st}`);
       x.jobs.forEach((j) => {
         const total = j.steps.length;
         j.steps.forEach((st2, i) => {
@@ -527,6 +538,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         add(r.empty ? `FINISH ✔ üres commit (nincs tartalmi változás) · ${r.url}` : `FINISH ✔ ${r.count} módosítás · ${r.url}`);
       }
       setStage(3); setPct(100); setStep("Kész");
+      resetInputs();
       setTimeout(() => pokeRef.current?.(), 5000);
     } catch (e: any) {
       if (e?.message === "Megszakítva.") {
@@ -680,7 +692,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${ddOpen ? "rotate-180" : ""}`} />
             </button>
             {ddOpen && (
-              <div style={{ maxHeight: ddMax }} className="absolute left-1.5 right-1.5 top-full z-10 mt-1 space-y-1.5 overflow-auto rounded-2xl border border-border bg-background/95 p-2 shadow-xl backdrop-blur-md">
+              <div style={{ maxHeight: ddMax }} className="absolute left-1.5 right-1.5 top-full z-10 mt-1 flex min-h-[3.75rem] flex-col space-y-1.5 overflow-auto rounded-2xl border border-border bg-background/95 p-2 shadow-xl backdrop-blur-md">
                 {allRuns.map((x) => (
                   <div key={x.id} className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -710,7 +722,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
                 ))}
                 {!allRuns.length && <div className={`text-muted-foreground ${building ? "animate-pulse" : ""}`}>{building ? "Várakozás a GitHubra…" : "Nincs követett futás."}</div>}
                 {/* Napló másolása: lebegő gomb a panel jobb alsó sarkában, nem foglal helyet a futások listájától. */}
-                <div className="sticky bottom-0 z-10 h-0">
+                <div className="sticky bottom-0 z-10 mt-auto h-0">
                   <button onClick={saveLog} title={isNative() ? "Napló másolása" : "Napló mentése"} aria-label={isNative() ? "Napló másolása" : "Napló mentése"} className="absolute bottom-1 right-0 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background/90 text-muted-foreground shadow-lg backdrop-blur-md">
                     {isNative() ? <Copy className="h-4 w-4" /> : <Download className="h-4 w-4" />}
                   </button>
@@ -737,7 +749,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           )}
         </div>
         <pre ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }} className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-2 font-mono text-[10px] text-muted-foreground">
-          {log.length ? log.join("\n") : "Napló…"}
+          {log.length ? <LogLines lines={log} /> : "Napló…"}
         </pre>
         </div>
         </div>
@@ -753,6 +765,12 @@ function stamp(iso: string): string {
 }
 
 type Summary = { kind: Kind; text: string };
+
+// Outcome mark for the log: ✔ if everything succeeded, ✖ if something failed, ■ if it was only stopped or skipped.
+function outcome(cs: (string | null)[]): string {
+  if (cs.some((c) => c && !["success", "skipped", "cancelled", "neutral"].includes(c))) return "✖";
+  return cs.length && cs.every((c) => c === "success" || c === "skipped") ? "✔" : "■";
+}
 
 // One line for the whole bottom area: the upload while it runs, otherwise what the actions (started here or elsewhere) are doing.
 function stateSummary(o: { stage: number; step: string; pct: number; runs: Run[]; building: boolean; hasRepo: boolean }): Summary & { progress: boolean } {

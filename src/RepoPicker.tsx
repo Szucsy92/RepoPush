@@ -9,8 +9,8 @@ const GLOW = "color-mix(in oklab, var(--primary) 60%, transparent)";
 
 /**
  * Repo dropdown on one piece of frosted glass, no separators or bands. The search field and the starred repos are
- * highlighted with the theme colour. Dragging a finger scrolls the list, and the repo under the finger pops out (bigger text,
- * a little glow). A long press on a starred repo lifts it: drag it up or down to change the order.
+ * highlighted with the theme colour. Dragging a finger scrolls the list, and the repo under the finger pops out (bigger text in the theme colour,
+ * a little glow); the chosen repo gets the same bigger, themed text. A long press on a starred repo lifts it: drag it up or down to change the order.
  */
 export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: string; onChange: (fullName: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -188,13 +188,14 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
   const row = (r: Repo, isStar: boolean) => {
     const selected = r.full_name === value;
     const pop = focus === r.full_name || lifted === r.full_name;
+    const emph = selected || pop; // the chosen repo and the one popping out under the finger: bigger text in the theme colour
     return (
       <li
         key={r.full_name}
         role="presentation"
         data-repo={r.full_name}
         data-starred={isStar ? "1" : undefined}
-        className={`relative flex select-none items-center rounded-xl duration-150 ${lifted === r.full_name ? "scale-[1.03]" : ""} ${lifted === r.full_name ? "" : "transition"} ${isStar ? "text-primary" : ""} ${selected ? "bg-accent" : ""} ${pop ? "z-10 bg-primary/15" : ""}`}
+        className={`relative flex select-none items-center rounded-xl duration-150 ${lifted === r.full_name ? "scale-[1.03]" : ""} ${lifted === r.full_name ? "" : "transition"} ${isStar || emph ? "text-primary" : ""} ${selected ? "bg-accent" : ""} ${pop ? "z-10 bg-primary/15" : ""}`}
         style={{
           ...(pop ? { boxShadow: `0 0 22px -6px ${GLOW}` } : {}),
           ...(lifted === r.full_name ? { transition: "scale .15s, box-shadow .15s, background-color .15s" } : {}),
@@ -202,7 +203,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
       >
         <button type="button" role="option" aria-selected={selected} title={r.full_name} onClick={() => pick(r.full_name)} style={{ WebkitTapHighlightColor: "transparent" }} className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-3 text-left font-mono text-base">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center">{selected && <Check className="h-5 w-5 text-primary" />}</span>
-          <span className={`min-w-0 flex-1 origin-left truncate transition duration-150 ease-[cubic-bezier(.2,1.5,.4,1)] ${pop ? "scale-[1.18]" : ""}`} style={pop ? { textShadow: `0 0 12px ${GLOW}` } : undefined}>{short(r.full_name)}</span>
+          <span className={`min-w-0 flex-1 origin-left truncate transition duration-150 ease-[cubic-bezier(.2,1.5,.4,1)] ${emph ? "scale-[1.18]" : ""}`} style={pop ? { textShadow: `0 0 12px ${GLOW}` } : undefined}>{short(r.full_name)}</span>
           {r.private && <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="privát" />}
         </button>
         <button

@@ -539,6 +539,9 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const names = open.map((x) => `${x.name} (${x.event})`).join(", ");
     if (!window.confirm(`Leállítod az összes futó actiont? (${names})`)) return;
     markStopped(open.map((x) => x.id));
+    // A leállítás kérése után a Build gomb azonnal visszaáll: a „build tart” jelző megszűnik, a követés (poller) viszont
+    // tovább fut, így a napló és a futáslista mutatja, amíg a GitHub tényleg le nem állítja a futásokat.
+    setTrack(r, { building: false, cancelWanted: false });
     await cancelOpen(open, false, r);
     pollers.current.get(r)?.wake(); // az új állapot azonnal látszik
     void pokeRef.current?.();
@@ -549,6 +552,8 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const q = force ? `A leállítás nem hatott. Kényszeríted a leállítást? (${r.name})` : `Leállítod a futó action-t? (${r.name}, ${r.event})`;
     if (!window.confirm(q)) return;
     markStopped([r.id]);
+    // Ha ez volt az utolsó leállítható futás, a Build gomb itt is azonnal visszaáll (a követés tovább megy).
+    if (!stoppable.some((x) => x.id !== r.id)) setTrack(repo, { building: false, cancelWanted: false });
     await cancelOpen([r], force);
     void pokeRef.current?.(); // az új állapot azonnal látszik
   }

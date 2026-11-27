@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, Copy, Download, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
+import { Bell, ChevronDown, Copy, Download, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
@@ -16,6 +16,7 @@ import { StatusIcon, kindOf, type Kind } from "@/StatusIcon";
 import { LogLines } from "@/LogLines";
 import { pollDelay, errorDelay } from "@/lib/cadence";
 import { ConfirmDialog } from "@/ConfirmDialog";
+import { buildNote, noteTime, type Note } from "@/lib/notes";
 import { getTrack, patchTrack, logFor, clearLog, type Tracks, type Track, type LogEntry } from "@/lib/build-track";
 
 
@@ -112,6 +113,19 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   // Any tap outside the strip/dropdown folds it back.
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Értesítések a lezárult buildekről (harang a fejlécben): megnézés után, a lista bezárásakor eltűnnek.
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const notesRef = useRef<HTMLDivElement>(null);
+  const noteId = useRef(0);
+  const notify = (r: string, rs: Run[]) => setNotes((l) => [buildNote(++noteId.current, r, rs, Date.now()), ...l]);
+  const closeNotes = () => { setNotesOpen(false); setNotes([]); };
+  useEffect(() => {
+    if (!notesOpen) return;
+    const out = (e: PointerEvent) => { if (!notesRef.current?.contains(e.target as Node)) closeNotes(); };
+    document.addEventListener("pointerdown", out);
+    return () => document.removeEventListener("pointerdown", out);
+  }, [notesOpen]);
   useEffect(() => {
     if (!menuOpen) return;
     const out = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
@@ -354,6 +368,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           finished = true;
           patch(r, { building: false });
           addTo(r, `BUILD KÉSZ ${outcome(rs.map((x) => x.conclusion))}: ${rs.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`);
+          notify(r, rs);
           if (repoRef.current === r) setRelTick((n) => n + 1);
           return;
         }
@@ -609,8 +624,28 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     <main className="app-insets flex h-[100dvh] flex-col overflow-hidden text-foreground">
       <header className="flex flex-wrap items-center justify-between gap-y-1.5 px-3 py-[5px]">
         <Brand className="hdr-brand" />
-        <div ref={menuRef} className="hdr-profile relative">
-          <button type="button" onClick={() => setMenuOpen((o) => !o)} aria-haspopup="menu" aria-expanded={menuOpen} className="flex h-8 items-center gap-1.5 rounded-full bg-card py-1 pl-1 pr-2.5 font-mono text-xs text-muted-foreground">
+        <div className="hdr-profile relative flex items-center gap-2">
+        <div ref={notesRef}>
+          <button type="button" onClick={() => { if (notesOpen) closeNotes(); else { setMenuOpen(false); setNotesOpen(true); } }} aria-haspopup="dialog" aria-expanded={notesOpen} aria-label={notes.length ? `Értesítések (${notes.length})` : "Értesítések"} title="Értesítések" className={`relative flex h-8 w-8 items-center justify-center rounded-full bg-card ${notes.length ? "text-foreground" : "text-muted-foreground"}`}>
+            <Bell className="h-4 w-4" aria-hidden="true" />
+            {notes.length > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-none text-primary-foreground">{notes.length}</span>}
+          </button>
+          {notesOpen && (
+            <div role="dialog" aria-label="Értesítések" className="absolute right-0 top-full z-30 mt-1.5 max-h-[min(20rem,60dvh)] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-2xl border border-border bg-popover p-1.5 shadow-2xl">
+              {notes.length ? notes.map((n) => (
+                <button key={n.id} type="button" onClick={() => { setRepo(n.repo); closeNotes(); }} className="flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left font-mono text-[11px]">
+                  <span className="mt-px"><StatusIcon kind={n.kind} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline justify-between gap-2"><span className="truncate font-bold text-foreground">{n.repo}</span><span className="shrink-0 text-muted-foreground">{noteTime(n.at)}</span></span>
+                    <span className="block break-words text-muted-foreground">{n.text}</span>
+                  </span>
+                </button>
+              )) : <div className="px-3 py-2 font-mono text-[11px] text-muted-foreground">Nincs új értesítés.</div>}
+            </div>
+          )}
+        </div>
+        <div ref={menuRef}>
+          <button type="button" onClick={() => { if (notesOpen) closeNotes(); setMenuOpen((o) => !o); }} aria-haspopup="menu" aria-expanded={menuOpen} className="flex h-8 items-center gap-1.5 rounded-full bg-card py-1 pl-1 pr-2.5 font-mono text-xs text-muted-foreground">
             {me ? <><img src={me.avatar} alt="" className="h-6 w-6 rounded-full" /><span className="text-foreground">{me.login}</span></> : <span className="pl-1.5">Bejelentkezés…</span>}
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen ? "rotate-180" : ""}`} aria-hidden="true" />
           </button>
@@ -620,6 +655,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
               <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); if (window.confirm("Kijelentkezel és törlöd a tokent erről az eszközről?")) onLogout(); }} className="w-full rounded-xl px-3 py-2.5 text-left font-mono text-sm text-destructive">Kijelentkezés</button>
             </div>
           )}
+        </div>
         </div>
         <div className="hdr-row flex gap-2">
           <RepoPicker repos={repos} value={repo} onChange={setRepo} />

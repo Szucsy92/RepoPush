@@ -20,7 +20,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
   const [lifted, setLifted] = useState(""); // starred repo being reordered
   const root = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const gesture = useRef<{ pointerId: number; lastY: number; startY: number; travel: number; moved: boolean } | null>(null);
+  const gesture = useRef<{ pointerId: number; lastY: number; startY: number; travel: number; moved: boolean; rowName: string; canReorder: boolean } | null>(null);
   const drag = useRef({ name: "", lastY: 0, grab: 0, scrollV: 0, raf: 0 });
   const longPress = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const latest = useRef({ stars, exists: (_: string) => false, searching: false });
@@ -33,9 +33,9 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
   const starredShown = starred.filter(match);
   const restShown = repos.filter((r) => !stars.includes(r.full_name) && match(r));
   const cur = byName.get(value);
-  latest.current = { stars, exists: (n: string) => byName.has(n), searching: !!needle };
+  latest.current = { ...latest.current, stars, exists: (n: string) => byName.has(n), searching: !!needle };
 
-  const update = (next: string[]) => { setStars(next); savePins(next); };
+  const update = (next: string[]) => { latest.current.stars = next; setStars(next); savePins(next); };
   const pick = (name: string) => { if (suppressClick.current) return; onChange(name); setOpen(false); };
 
   // Touch/pen scrolling, long-press reorder for starred repos, and select-on-release.
@@ -60,7 +60,9 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     const to = dragTarget(mids, at, d.lastY);
     if (to !== at) {
       tap("light");
-      setStars((current) => moveTo(current, latest.current.exists, d.name, to));
+      const next = moveTo(latest.current.stars, latest.current.exists, d.name, to);
+      latest.current.stars = next;
+      setStars(next);
     }
   };
 
@@ -68,19 +70,25 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('input, button[aria-label="Csillag levétele"], button[aria-label="Csillagozás"]')) return;
     const row = (e.target as HTMLElement).closest<HTMLElement>("[data-repo]");
-    gesture.current = { pointerId: e.pointerId, lastY: e.clientY, startY: e.clientY, travel: 0, moved: false };
-    if (row && row.dataset.starred === "1" && !needle) {
+    const rowName = row?.dataset.repo ?? "";
+    const canReorder = !!row && row.dataset.starred === "1" && !needle;
+    gesture.current = { pointerId: e.pointerId, lastY: e.clientY, startY: e.clientY, travel: 0, moved: false, rowName, canReorder };
+    if (canReorder && row) {
       if (longPress.current) window.clearTimeout(longPress.current);
+      const pressedRow = row;
+      const pointerId = e.pointerId;
       longPress.current = window.setTimeout(() => {
         const g = gesture.current;
-        if (!g || g.pointerId !== e.pointerId || g.moved || !row.isConnected) return;
-        drag.current.name = name;
+        // Use the repo captured on pointer-down. The previous patch referenced an
+        // undefined `name`, so the long-press callback crashed before lifting the row.
+        if (!g || g.pointerId !== pointerId || g.moved || !g.canReorder || !g.rowName || !pressedRow.isConnected || latest.current.searching) return;
+        drag.current.name = g.rowName;
         drag.current.lastY = g.lastY;
-        drag.current.grab = g.startY - row.getBoundingClientRect().top;
+        drag.current.grab = g.startY - pressedRow.getBoundingClientRect().top;
         drag.current.scrollV = 0;
-        setLifted(name);
+        setLifted(g.rowName);
         tap("medium");
-      }, 380);
+      }, 420);
     }
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -90,7 +98,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     if (!g || g.pointerId !== e.pointerId) return;
     const delta = e.clientY - g.lastY;
     g.travel += Math.abs(delta);
-    if (Math.abs(e.clientY - g.startY) > 8) {
+    if (Math.abs(e.clientY - g.startY) > 10) {
       g.moved = true;
       if (longPress.current) { window.clearTimeout(longPress.current); longPress.current = null; }
     }
@@ -159,7 +167,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
       const row = Array.from(list.current.querySelectorAll<HTMLElement>("[data-repo]")).find((item) => item.dataset.repo === d.name);
       if (row) row.style.transform = "";
     }
-    d.name = ""; d.scrollV = 0;
+    d.name = ""; d.scrollV = 0; d.raf = 0;
     gesture.current = null;
     setLifted(""); setFocus("");
   };

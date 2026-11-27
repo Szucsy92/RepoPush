@@ -7,13 +7,11 @@ export type Track = {
   since: string; // az indítás ideje (ISO): ennél újabb futásokat követjük; üres = nincs aktív követés
   runs: Run[];
   building: boolean; // az appból indított build még tart (vagy a futás megjelenésére várunk)
-  stopping: boolean; // leállítás kérve, a futás még nem zárult le
-  forceReady: boolean; // ha a leállítás nem hat, kényszeríthető
   cancelWanted: boolean; // a build még nem jelent meg: amint megjelenik, leállítjuk
 };
 export type Tracks = Record<string, Track>;
 
-export const emptyTrack: Track = { since: "", runs: [], building: false, stopping: false, forceReady: false, cancelWanted: false };
+export const emptyTrack: Track = { since: "", runs: [], building: false, cancelWanted: false };
 
 export const getTrack = (t: Tracks, repo: string): Track => t[repo] ?? emptyTrack;
 

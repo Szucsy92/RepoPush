@@ -40,7 +40,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   // repónak a Build gombját. A ref a „most” állapota az aszinkron körökhöz, a state csak a megjelenítéshez kell.
   const [tracks, setTracks] = useState<Tracks>({});
   const tracksRef = useRef<Tracks>({});
-  const patch = (r: string, p: Partial<Track>) => { tracksRef.current = patchTrack(tracksRef.current, r, p); setTracks(tracksRef.current); };
+  const setTrack = (r: string, p: Partial<Track>) => { tracksRef.current = patchTrack(tracksRef.current, r, p); setTracks(tracksRef.current); };
   const pollers = useRef(new Map<string, { stop: () => void; wake: () => void }>()); // repónként egy build-követő
   const startTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>()); // az indítás utáni 3 mp-es várakozás
   const forceTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>()); // a Kényszerítés megjelenéséig
@@ -190,7 +190,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const t = forceTimers.current.get(repo);
     if (t) { clearTimeout(t); forceTimers.current.delete(repo); }
     const c = tracksRef.current[repo];
-    if (c && (c.stopping || c.forceReady || c.cancelWanted)) patch(repo, { stopping: false, forceReady: false, cancelWanted: false });
+    if (c && (c.stopping || c.forceReady || c.cancelWanted)) setTrack(repo, { stopping: false, forceReady: false, cancelWanted: false });
   }, [running, repo]);
 
   // Leállítás kérve egy-egy futásra (az Action fülről vagy a build sáv listájából): futásonként követjük, mikor kérték.
@@ -343,7 +343,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
 
   function startTracking(r: string, br: string, since: string) {
     stopTracking(r);
-    patch(r, { since });
+    setTrack(r, { since });
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let t0 = Date.now();
@@ -357,24 +357,24 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         const rs = await gh.buildStatus(r, br, since);
         if (stop) return;
         fails = 0;
-        patch(r, { runs: rs });
+        setTrack(r, { runs: rs });
         logPhases(rs, phasesFor(r), r);
         if (tracksRef.current[r]?.cancelWanted) {
           const open = rs.filter((x) => x.status !== "completed");
-          if (open.length) { patch(r, { cancelWanted: false }); void cancelOpen(open, false, r); }
+          if (open.length) { setTrack(r, { cancelWanted: false }); void cancelOpen(open, false, r); }
         }
         const done = rs.length > 0 && rs.every((x) => x.status === "completed");
         if (done) {
           finished = true;
-          patch(r, { building: false });
+          setTrack(r, { building: false });
           addTo(r, `BUILD KÉSZ ${outcome(rs.map((x) => x.conclusion))}: ${rs.map((x) => `${x.name} → ${x.conclusion}`).join(", ")}`);
           notify(r, rs);
           if (repoRef.current === r) setRelTick((n) => n + 1);
           return;
         }
         // Ne ragadjon be: ha 2 percig nem indult futás, vagy 45 percnél tovább tart, feladjuk a várakozást.
-        if (!rs.length && Date.now() - t0 > 120000) { patch(r, { building: false }); addTo(r, "Nem indult build ebben a 2 percben. Nézd meg az Actions oldalt, vagy indíts újat."); return; }
-        if (Date.now() - t0 > 45 * 60000) { patch(r, { building: false }); addTo(r, "A build követése időtúllépés miatt leállt (45 perc). A ↻ gombbal újra lekérdezheted."); return; }
+        if (!rs.length && Date.now() - t0 > 120000) { setTrack(r, { building: false }); addTo(r, "Nem indult build ebben a 2 percben. Nézd meg az Actions oldalt, vagy indíts újat."); return; }
+        if (Date.now() - t0 > 45 * 60000) { setTrack(r, { building: false }); addTo(r, "A build követése időtúllépés miatt leállt (45 perc). A ↻ gombbal újra lekérdezheted."); return; }
       } catch (e: any) {
         fails++;
         if (fails === 1 || fails % 10 === 0) addTo(r, `Build állapot hiba: ${e.message}`);
@@ -427,14 +427,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const ft = forceTimers.current.get(r);
     if (ft) { clearTimeout(ft); forceTimers.current.delete(r); }
     phasesByRepo.current[r] = {};
-    patch(r, { since: "", runs: [], building: true, stopping: false, forceReady: false, cancelWanted: false });
+    setTrack(r, { since: "", runs: [], building: true, stopping: false, forceReady: false, cancelWanted: false });
     const t = new Date(Date.now() - 5000).toISOString().replace(/\.\d+Z$/, "Z");
     try {
       const res = await gh.startBuild(r, br);
       addTo(r, `BUILD START → ${res.started.length ? res.started.join(", ") : "nincs kézzel indítható workflow, a feltöltés által indítottakat követem"}`);
       if (res.skipped.length) addTo(r, `  (kihagyva, nincs workflow_dispatch: ${res.skipped.join(", ")})`);
       startTimers.current.set(r, setTimeout(() => { startTimers.current.delete(r); startTracking(r, br, t); }, 3000));
-    } catch (e: any) { addTo(r, `Build hiba: ${e.message}`); patch(r, { building: false }); }
+    } catch (e: any) { addTo(r, `Build hiba: ${e.message}`); setTrack(r, { building: false }); }
   }
 
   // A diff ablak harmonika-szerűen nyílik: a helyéről egyszerre felfelé és lefelé növekszik a célméretig, becsukáskor ugyanígy, visszafelé.
@@ -487,17 +487,17 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     const open = openAll;
     if (!open.length) {
       // Még nem jelent meg a futás a GitHubon: amint megjelenik, leállítjuk.
-      patch(r, { cancelWanted: true, stopping: true });
+      setTrack(r, { cancelWanted: true, stopping: true });
       add("MÉGSE: a build leáll, amint megjelenik a GitHubon.");
       return;
     }
     const names = open.map((x) => `${x.name} (${x.event})`).join(", ");
     const q = force ? `A leállítás nem hatott. Kényszeríted a leállítást? (${names})` : `Leállítod az összes futó actiont? (${names})`;
     if (!window.confirm(q)) return;
-    patch(r, { stopping: true, forceReady: false });
+    setTrack(r, { stopping: true, forceReady: false });
     const ft = forceTimers.current.get(r);
     if (ft) clearTimeout(ft);
-    forceTimers.current.set(r, setTimeout(() => { forceTimers.current.delete(r); patch(r, { forceReady: true }); }, 15000));
+    forceTimers.current.set(r, setTimeout(() => { forceTimers.current.delete(r); setTrack(r, { forceReady: true }); }, 15000));
     await cancelOpen(open, force, r);
     pollers.current.get(r)?.wake(); // az új állapot azonnal látszik
     void pokeRef.current?.();
@@ -546,7 +546,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     if (!repo || !branch) return add("Válassz repót és ágat.");
     setBusy(true);
     setStage(1); setPct(0); setStep("Előkészítés"); setLogEntries((l) => clearLog(l, repo));
-    stopTracking(repo); patch(repo, { since: "", runs: [], building: false });
+    stopTracking(repo); setTrack(repo, { since: "", runs: [], building: false });
     add(`START → ${repo}@${branch}`);
     try {
       if (tab === "zip") {

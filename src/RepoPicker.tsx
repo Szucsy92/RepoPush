@@ -19,7 +19,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
   const [focus, setFocus] = useState(""); // the repo under the finger: it pops out
   const root = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const gesture = useRef<{ pointerId: number; lastY: number; startY: number; moved: boolean } | null>(null);
+  const gesture = useRef<{ pointerId: number; lastY: number; startY: number; travel: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
 
   const byName = useMemo(() => new Map(repos.map((r) => [r.full_name, r])), [repos]);
@@ -37,7 +37,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
   const onListPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('input, button[aria-label="Csillag levétele"], button[aria-label="Csillagozás"]')) return;
-    gesture.current = { pointerId: e.pointerId, lastY: e.clientY, startY: e.clientY, moved: false };
+    gesture.current = { pointerId: e.pointerId, lastY: e.clientY, startY: e.clientY, travel: 0, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
@@ -45,14 +45,13 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     const g = gesture.current;
     if (!g || g.pointerId !== e.pointerId) return;
     const delta = e.clientY - g.lastY;
-    const travel = Math.abs(e.clientY - g.startY);
-    if (travel > 5) g.moved = true;
+    g.travel += Math.abs(delta);
+    if (Math.abs(e.clientY - g.startY) > 5) g.moved = true;
     if (g.moved) {
       e.preventDefault();
-      // Start gently, then accelerate progressively as the finger travels farther.
-      // The factor is intentionally capped so long drags never become abrupt.
-      const speed = 0.22 + Math.min(travel / 420, 0.63);
-      // Keep the source picker's direction: finger down moves the list down.
+      // Begin slowly; sustained finger travel progressively increases the scroll response.
+      const speed = 0.18 + Math.min(g.travel / 520, 0.62);
+      // Keep the requested direction: finger down moves the list down, finger up moves it up.
       e.currentTarget.scrollTop += delta * speed;
       const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-repo]");
       setFocus(row?.dataset.repo ?? "");
@@ -68,10 +67,14 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     const row = target?.closest<HTMLElement>("[data-repo]");
     const onStar = !!target?.closest('button[aria-label="Csillag levétele"], button[aria-label="Csillagozás"]');
     if (row && !onStar) {
+      // Select on release, but keep the dropdown mounted through the synthetic click.
+      // The click-capture handler consumes that click so it cannot activate the page behind it.
       suppressClick.current = true;
       onChange(row.dataset.repo ?? "");
-      setOpen(false);
-      window.setTimeout(() => { suppressClick.current = false; }, 250);
+      window.setTimeout(() => {
+        setOpen(false);
+        suppressClick.current = false;
+      }, 0);
     } else if (g.moved) {
       suppressClick.current = true;
       window.setTimeout(() => { suppressClick.current = false; }, 250);
@@ -147,6 +150,12 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
             onPointerMove={onListPointerMove}
             onPointerUp={onListPointerUp}
             onPointerCancel={onListPointerCancel}
+            onClickCapture={(e) => {
+              if (suppressClick.current) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
             onContextMenu={(e) => e.preventDefault()}
             className="relative max-h-[min(66vh,30rem)] touch-none overflow-x-hidden overflow-y-auto overscroll-contain p-1.5"
           >

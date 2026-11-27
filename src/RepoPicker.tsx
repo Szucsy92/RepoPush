@@ -45,11 +45,15 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     const g = gesture.current;
     if (!g || g.pointerId !== e.pointerId) return;
     const delta = e.clientY - g.lastY;
-    if (Math.abs(e.clientY - g.startY) > 5) g.moved = true;
+    const travel = Math.abs(e.clientY - g.startY);
+    if (travel > 5) g.moved = true;
     if (g.moved) {
       e.preventDefault();
-      // Match the source wheel picker: dragging the finger down advances down the list.
-      e.currentTarget.scrollTop += delta;
+      // Start gently, then accelerate progressively as the finger travels farther.
+      // The factor is intentionally capped so long drags never become abrupt.
+      const speed = 0.22 + Math.min(travel / 420, 0.63);
+      // Keep the source picker's direction: finger down moves the list down.
+      e.currentTarget.scrollTop += delta * speed;
       const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-repo]");
       setFocus(row?.dataset.repo ?? "");
     }

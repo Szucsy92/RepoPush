@@ -16,6 +16,8 @@ import { StatusIcon, kindOf, type Kind } from "@/StatusIcon";
 import { LogLines } from "@/LogLines";
 import { pollDelay, errorDelay } from "@/lib/cadence";
 import { ConfirmDialog } from "@/ConfirmDialog";
+import { UpdateDialog, type UpdateStatus } from "@/UpdateDialog";
+import { downloadAndInstall, installedVersionCode, latestAppRelease, needsUpdate, releaseRepository, type AppRelease } from "@/lib/ota";
 import { buildNote, noteTime, type Note } from "@/lib/notes";
 import { getTrack, patchTrack, logFor, clearLog, type Tracks, type Track, type LogEntry } from "@/lib/build-track";
 
@@ -119,6 +121,43 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const noteId = useRef(0);
   const notify = (r: string, rs: Run[]) => setNotes((l) => [buildNote(++noteId.current, r, rs, Date.now()), ...l]);
   const closeNotes = () => { setNotesOpen(false); setNotes([]); };
+  // Appon belüli frissítés (csak az Android APK-ban): induláskor, előtérbe lépéskor (legfeljebb 10 percenként) és kézzel keres.
+  const [update, setUpdate] = useState<AppRelease | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(0); // az elhalasztott kiadás build száma: újabbnál újra felugrik
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
+  const [updatePercent, setUpdatePercent] = useState<number | null>(null);
+  const [updateCheck, setUpdateCheck] = useState<"idle" | "checking" | "latest" | "error">("idle");
+  const lastUpdateCheck = useRef(0);
+  async function checkUpdate(manual: boolean) {
+    const r = releaseRepository();
+    if (!r) { if (manual) setUpdateCheck("error"); return; }
+    if (manual) setUpdateCheck("checking");
+    try {
+      const [rel, installed] = await Promise.all([latestAppRelease(gh, r), installedVersionCode()]);
+      if (rel && needsUpdate(installed, rel.versionCode)) {
+        setUpdate(rel); setUpdateCheck("idle");
+        if (manual) setUpdateDismissed(0); // kézi kereséskor újra felugrik az ablak
+      } else setUpdateCheck(manual ? "latest" : "idle");
+    } catch { setUpdateCheck(manual ? "error" : "idle"); }
+  }
+  async function startUpdate() {
+    if (!update || updateStatus === "downloading") return;
+    setUpdateStatus("downloading"); setUpdatePercent(null);
+    const state = await downloadAndInstall(update.apk, setUpdatePercent);
+    if (state === "installing") { setUpdateStatus("idle"); setUpdateDismissed(update.versionCode); } // megnyílt a rendszer telepítője
+    else setUpdateStatus(state === "needsPermission" ? "permission" : "failed");
+  }
+  useEffect(() => {
+    if (!isNative() || !releaseRepository()) return;
+    const look = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastUpdateCheck.current < 10 * 60 * 1000) return;
+      lastUpdateCheck.current = Date.now();
+      void checkUpdate(false);
+    };
+    look();
+    document.addEventListener("visibilitychange", look);
+    return () => document.removeEventListener("visibilitychange", look);
+  }, [gh]);
   useEffect(() => {
     if (!notesOpen) return;
     const out = (e: PointerEvent) => { if (!notesRef.current?.contains(e.target as Node)) closeNotes(); };
@@ -623,6 +662,10 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     <>
     {confirm && <ConfirmDialog plan={confirm.plan} repo={repo} branch={branch} mode={tab === "patch" ? "patch" : mode === "replace" ? "teljes csere" : "beillesztés"}
       onOk={() => { confirm.resolve(true); setConfirm(null); }} onCancel={() => { confirm.resolve(false); setConfirm(null); }} />}
+    {update && !confirm && updateDismissed !== update.versionCode && (
+      <UpdateDialog release={update} status={updateStatus} percent={updatePercent} onInstall={() => void startUpdate()}
+        onLater={() => { setUpdateDismissed(update.versionCode); setUpdateStatus("idle"); }} />
+    )}
     <main className="app-insets flex h-[100dvh] flex-col overflow-hidden text-foreground">
       <header className="flex flex-wrap items-center justify-between gap-y-1.5 px-3 py-[5px]">
         <Brand className="hdr-brand" />
@@ -647,13 +690,19 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           )}
         </div>
         <div ref={menuRef}>
-          <button type="button" onClick={() => { if (notesOpen) closeNotes(); setMenuOpen((o) => !o); }} aria-haspopup="menu" aria-expanded={menuOpen} className="flex h-8 items-center gap-1.5 rounded-full bg-card py-1 pl-1 pr-2.5 font-mono text-xs text-muted-foreground">
+          <button type="button" onClick={() => { if (notesOpen) closeNotes(); setUpdateCheck((c) => (c === "checking" ? c : "idle")); setMenuOpen((o) => !o); }} aria-haspopup="menu" aria-expanded={menuOpen} className="flex h-8 items-center gap-1.5 rounded-full bg-card py-1 pl-1 pr-2.5 font-mono text-xs text-muted-foreground">
             {me ? <><img src={me.avatar} alt="" className="h-6 w-6 rounded-full" /><span className="text-foreground">{me.login}</span></> : <span className="pl-1.5">Bejelentkezés…</span>}
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen ? "rotate-180" : ""}`} aria-hidden="true" />
           </button>
           {menuOpen && (
             <div role="menu" className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-2xl border border-border bg-popover p-1.5 shadow-2xl">
               {me && <div className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">Bejelentkezve: {me.login}</div>}
+              {isNative() && (import.meta.env["VITE_APP_VERSION"] as string | undefined) && <div className="truncate px-3 pb-1 font-mono text-[11px] text-muted-foreground">RepoPush {import.meta.env["VITE_APP_VERSION"] as string}</div>}
+              {isNative() && releaseRepository() && (
+                <button type="button" role="menuitem" disabled={updateCheck === "checking"} onClick={() => { if (update) { setUpdateDismissed(0); setMenuOpen(false); } else void checkUpdate(true); }} className="w-full rounded-xl px-3 py-2.5 text-left font-mono text-sm disabled:opacity-60">
+                  {updateCheck === "checking" ? "Keresés…" : update ? `Új verzió: ${update.version}` : updateCheck === "latest" ? "A legújabb verzió van telepítve" : updateCheck === "error" ? "A frissítés most nem érhető el" : "Frissítés keresése"}
+                </button>
+              )}
               <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); if (window.confirm("Kijelentkezel és törlöd a tokent erről az eszközről?")) onLogout(); }} className="w-full rounded-xl px-3 py-2.5 text-left font-mono text-sm text-destructive">Kijelentkezés</button>
             </div>
           )}

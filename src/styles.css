@@ -249,6 +249,12 @@ button:not(:disabled):active, a[href]:active, label[class*="cursor-pointer"]:act
   transform: scale(0.955);
   background-image: linear-gradient(rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.16));
 }
+/* Repo rows use a clean touch surface: no global pressed tile/grey overlay. */
+.repo-picker-list button:not(:disabled):active {
+  transform: none;
+  background-image: none;
+}
+.repo-picker-list button { -webkit-tap-highlight-color: transparent; }
 
 /* ---- Repo dropdown tab: framed; a tiny slow glow while nothing is chosen, a bright frame once it is ---- */
 .picker { border: 1.5px solid color-mix(in oklab, var(--primary) 40%, var(--border)); }

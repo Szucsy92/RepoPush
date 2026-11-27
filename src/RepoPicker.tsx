@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Lock, Search, Star } from "lucide-react";
 import type { Repo } from "@/lib/github";
 import { tap } from "@/lib/haptics";
-import { readPins, savePins, togglePin } from "@/lib/pins";
+import { dragTarget, moveTo, readPins, savePins, togglePin } from "@/lib/pins";
 
 const short = (fullName: string) => fullName.split("/")[1] ?? fullName;
 const GLOW = "color-mix(in oklab, var(--primary) 60%, transparent)";
@@ -17,9 +17,13 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
   const [q, setQ] = useState("");
   const [stars, setStars] = useState<string[]>(readPins);
   const [focus, setFocus] = useState(""); // the repo under the finger: it pops out
+  const [lifted, setLifted] = useState(""); // starred repo being reordered
   const root = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ pointerId: number; lastY: number; startY: number; travel: number; moved: boolean } | null>(null);
+  const drag = useRef({ name: "", lastY: 0, grab: 0, scrollV: 0, raf: 0 });
+  const longPress = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const latest = useRef({ stars, exists: (_: string) => false, searching: false });
   const suppressClick = useRef(false);
 
   const byName = useMemo(() => new Map(repos.map((r) => [r.full_name, r])), [repos]);
@@ -29,15 +33,55 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
   const starredShown = starred.filter(match);
   const restShown = repos.filter((r) => !stars.includes(r.full_name) && match(r));
   const cur = byName.get(value);
+  latest.current = { stars, exists: (n: string) => byName.has(n), searching: !!needle };
 
   const update = (next: string[]) => { setStars(next); savePins(next); };
   const pick = (name: string) => { if (suppressClick.current) return; onChange(name); setOpen(false); };
 
-  // Keep the existing dropdown and styling; only replace the list's gesture handling.
+  // Touch/pen scrolling, long-press reorder for starred repos, and select-on-release.
+  const placeDraggedRow = () => {
+    const el = list.current;
+    const d = drag.current;
+    if (!el || !d.name) return;
+    const row = Array.from(el.querySelectorAll<HTMLElement>("[data-repo]")).find((item) => item.dataset.repo === d.name);
+    if (!row) return;
+    const natural = el.getBoundingClientRect().top - el.scrollTop + row.offsetTop;
+    row.style.transform = `translateY(${d.lastY - d.grab - natural}px)`;
+  };
+
+  const reorderDraggedRow = () => {
+    const el = list.current;
+    const d = drag.current;
+    if (!el || !d.name) return;
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-starred="1"]'));
+    const at = rows.findIndex((r) => r.dataset.repo === d.name);
+    if (at < 0) return;
+    const mids = rows.map((r) => { const b = r.getBoundingClientRect(); return b.top + b.height / 2; });
+    const to = dragTarget(mids, at, d.lastY);
+    if (to !== at) {
+      tap("light");
+      setStars((current) => moveTo(current, latest.current.exists, d.name, to));
+    }
+  };
+
   const onListPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('input, button[aria-label="Csillag levétele"], button[aria-label="Csillagozás"]')) return;
+    const row = (e.target as HTMLElement).closest<HTMLElement>("[data-repo]");
     gesture.current = { pointerId: e.pointerId, lastY: e.clientY, startY: e.clientY, travel: 0, moved: false };
+    if (row && row.dataset.starred === "1" && !needle) {
+      if (longPress.current) window.clearTimeout(longPress.current);
+      longPress.current = window.setTimeout(() => {
+        const g = gesture.current;
+        if (!g || g.pointerId !== e.pointerId || g.moved || !row.isConnected) return;
+        drag.current.name = name;
+        drag.current.lastY = g.lastY;
+        drag.current.grab = g.startY - row.getBoundingClientRect().top;
+        drag.current.scrollV = 0;
+        setLifted(name);
+        tap("medium");
+      }, 380);
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
@@ -46,12 +90,25 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     if (!g || g.pointerId !== e.pointerId) return;
     const delta = e.clientY - g.lastY;
     g.travel += Math.abs(delta);
-    if (Math.abs(e.clientY - g.startY) > 5) g.moved = true;
+    if (Math.abs(e.clientY - g.startY) > 8) {
+      g.moved = true;
+      if (longPress.current) { window.clearTimeout(longPress.current); longPress.current = null; }
+    }
+    const d = drag.current;
+    if (d.name) {
+      e.preventDefault();
+      d.lastY = e.clientY;
+      const bounds = e.currentTarget.getBoundingClientRect();
+      d.scrollV = e.clientY < bounds.top + 48 ? -7 : e.clientY > bounds.bottom - 48 ? 7 : 0;
+      if (d.scrollV) e.currentTarget.scrollTop += d.scrollV;
+      reorderDraggedRow();
+      placeDraggedRow();
+      return;
+    }
     if (g.moved) {
       e.preventDefault();
       // Begin slowly; sustained finger travel progressively increases the scroll response.
       const speed = 0.18 + Math.min(g.travel / 520, 0.62);
-      // Keep the requested direction: finger down moves the list down, finger up moves it up.
       e.currentTarget.scrollTop += delta * speed;
       const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-repo]");
       setFocus(row?.dataset.repo ?? "");
@@ -63,12 +120,25 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     const g = gesture.current;
     if (!g || g.pointerId !== e.pointerId) return;
     gesture.current = null;
+    if (longPress.current) { window.clearTimeout(longPress.current); longPress.current = null; }
+    const d = drag.current;
+    if (d.name) {
+      const row = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-repo]")).find((item) => item.dataset.repo === d.name);
+      if (row) row.style.transform = "";
+      if (d.raf) cancelAnimationFrame(d.raf);
+      d.name = ""; d.raf = 0; d.scrollV = 0;
+      setLifted("");
+      savePins(latest.current.stars);
+      tap("light");
+      suppressClick.current = true;
+      window.setTimeout(() => { suppressClick.current = false; }, 350);
+      setFocus("");
+      return;
+    }
     const target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
     const row = target?.closest<HTMLElement>("[data-repo]");
     const onStar = !!target?.closest('button[aria-label="Csillag levétele"], button[aria-label="Csillagozás"]');
     if (row && !onStar) {
-      // Select on release, but keep the dropdown mounted through the synthetic click.
-      // The click-capture handler consumes that click so it cannot activate the page behind it.
       suppressClick.current = true;
       onChange(row.dataset.repo ?? "");
       window.setTimeout(() => {
@@ -82,11 +152,23 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
     window.setTimeout(() => setFocus(""), 140);
   };
 
-  const onListPointerCancel = () => { gesture.current = null; setFocus(""); };
+  const onListPointerCancel = () => {
+    if (longPress.current) { window.clearTimeout(longPress.current); longPress.current = null; }
+    const d = drag.current;
+    if (d.name && list.current) {
+      const row = Array.from(list.current.querySelectorAll<HTMLElement>("[data-repo]")).find((item) => item.dataset.repo === d.name);
+      if (row) row.style.transform = "";
+    }
+    d.name = ""; d.scrollV = 0;
+    gesture.current = null;
+    setLifted(""); setFocus("");
+  };
+
+  useLayoutEffect(() => { if (drag.current.name) placeDraggedRow(); }, [stars]);
 
   // Any tap outside (or Escape) folds the list back.
   useEffect(() => {
-    if (!open) { setQ(""); setFocus(""); return; }
+    if (!open) { setQ(""); setFocus(""); setLifted(""); return; }
     const out = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("pointerdown", out);
@@ -97,19 +179,20 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
 
   const row = (r: Repo, isStar: boolean) => {
     const selected = r.full_name === value;
-    const pop = focus === r.full_name;
+    const pop = focus === r.full_name || lifted === r.full_name;
     return (
       <li
         key={r.full_name}
         role="presentation"
         data-repo={r.full_name}
         data-starred={isStar ? "1" : undefined}
-        className={`relative flex select-none items-center rounded-xl duration-150 transition ${isStar ? "text-primary" : ""} ${selected ? "bg-accent" : ""} ${pop ? "z-10 bg-primary/15" : ""}`}
+        className={`relative flex select-none items-center rounded-xl duration-150 ${lifted === r.full_name ? "scale-[1.03]" : ""} ${lifted === r.full_name ? "" : "transition"} ${isStar ? "text-primary" : ""} ${selected ? "bg-accent" : ""} ${pop ? "z-10 bg-primary/15" : ""}`}
         style={{
           ...(pop ? { boxShadow: `0 0 22px -6px ${GLOW}` } : {}),
+          ...(lifted === r.full_name ? { transition: "scale .15s, box-shadow .15s, background-color .15s" } : {}),
         }}
       >
-        <button type="button" role="option" aria-selected={selected} title={r.full_name} onClick={() => pick(r.full_name)} className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-3 text-left font-mono text-base">
+        <button type="button" role="option" aria-selected={selected} title={r.full_name} onClick={() => pick(r.full_name)} style={{ WebkitTapHighlightColor: "transparent" }} className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-3 text-left font-mono text-base">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center">{selected && <Check className="h-5 w-5 text-primary" />}</span>
           <span className={`min-w-0 flex-1 origin-left truncate transition duration-150 ease-[cubic-bezier(.2,1.5,.4,1)] ${pop ? "scale-[1.18]" : ""}`} style={pop ? { textShadow: `0 0 12px ${GLOW}` } : undefined}>{short(r.full_name)}</span>
           {r.private && <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="privát" />}
@@ -119,7 +202,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
           onClick={() => { if (!suppressClick.current) update(togglePin(stars, r.full_name)); }}
           aria-label={isStar ? "Csillag levétele" : "Csillagozás"}
           aria-pressed={isStar}
-          className={`mr-1 flex h-12 w-11 shrink-0 items-center justify-center rounded-xl ${isStar ? "text-primary" : "text-muted-foreground"}`}
+          style={{ WebkitTapHighlightColor: "transparent" }} className={`mr-1 flex h-12 w-11 shrink-0 items-center justify-center rounded-xl ${isStar ? "text-primary" : "text-muted-foreground"}`}
         >
           <Star className={`h-5 w-5 ${isStar ? "fill-current" : ""}`} />
         </button>
@@ -135,7 +218,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
         <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${value ? "text-primary" : "text-muted-foreground"} ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-2 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
+        <div className="repo-picker-list absolute left-0 top-full z-30 mt-2 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
           {repos.length > 8 && (
             <div className="mx-2 mt-2 flex items-center gap-2 rounded-xl bg-primary/10 px-3 py-2 text-primary">
               <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -157,7 +240,7 @@ export function RepoPicker({ repos, value, onChange }: { repos: Repo[]; value: s
               }
             }}
             onContextMenu={(e) => e.preventDefault()}
-            className="relative max-h-[min(66vh,30rem)] touch-none overflow-x-hidden overflow-y-auto overscroll-contain p-1.5"
+            style={{ WebkitTapHighlightColor: "transparent" }} className="relative max-h-[min(66vh,30rem)] touch-none overflow-x-hidden overflow-y-auto overscroll-contain p-1.5"
           >
             <ul>
               {starredShown.map((r) => row(r, true))}

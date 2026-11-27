@@ -331,18 +331,3 @@ button:not(:disabled):active, a[href]:active, label[class*="cursor-pointer"]:act
   .land-shell .space-y-4 > * { margin-block-end: 0.5rem; }
   .pad-keys button { padding-block: 0.2rem; }
 }
-
-/* Wheel picker ported from Asset Mileage Compass. */
-@utility wheel-mask { mask-image: linear-gradient(to bottom, black 70%, transparent); }
-@utility no-scrollbar { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
-.wheel-lens {
-  border-radius: 0.75rem;
-  background: color-mix(in oklab, var(--foreground) 7%, transparent);
-  border: 1px solid color-mix(in oklab, var(--primary) 45%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 12%, transparent), 0 4px 14px -8px var(--primary);
-  backdrop-filter: blur(2px);
-  transition: transform 320ms cubic-bezier(.22,1.35,.38,1), opacity 160ms ease-out;
-}
-.wheel-lens.is-moving { transition: transform 70ms linear, opacity 160ms ease-out; }
-.wheel-item { position: relative; transition: transform 280ms cubic-bezier(.34,1.56,.64,1), opacity 160ms ease-out, color 120ms; }
-@media (prefers-reduced-motion: reduce) { .wheel-item, .wheel-lens { animation: none !important; transition: none !important; } }

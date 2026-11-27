@@ -18,7 +18,7 @@ import { pollDelay, errorDelay } from "@/lib/cadence";
 import { ConfirmDialog } from "@/ConfirmDialog";
 import { UpdateDialog, type UpdateStatus } from "@/UpdateDialog";
 import { downloadAndInstall, installedVersionCode, latestAppRelease, needsUpdate, releaseRepository, type AppRelease } from "@/lib/ota";
-import { buildNote, noteTime, type Note } from "@/lib/notes";
+import { buildNote, liveNotes, noteTime, type Note } from "@/lib/notes";
 import { getTrack, patchTrack, logFor, clearLog, type Tracks, type Track, type LogEntry } from "@/lib/build-track";
 
 
@@ -237,6 +237,9 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const stoppable = openAll.filter((x) => !stopReq[x.id]);
   const running = building || stoppable.length > 0;
   const anyStopReq = Object.keys(stopReq).length > 0;
+  // A harang listája: elöl a most futó buildek (élő sorok, a futás állapotából), utána a lezárultak. A lista bezárása csak a lezártakat törli.
+  const liveNote = liveNotes(tracks, { repo, runs: active }, (id) => !!stopReq[id], Date.now());
+  const shownNotes = [...liveNote, ...notes];
   useEffect(() => {
     if (!anyStopReq) return;
     // 15 mp után megjelenik a futás melletti „kényszerít”; a 10 percnél régebbi jelzések eltűnnek (elakadt leállítás újra leállíthatóként látszik).
@@ -676,14 +679,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         <Brand className="hdr-brand" />
         <div className="hdr-profile relative flex items-center gap-2">
         <div ref={notesRef}>
-          <button type="button" onClick={() => { if (notesOpen) closeNotes(); else { setMenuOpen(false); setNotesOpen(true); } }} aria-haspopup="dialog" aria-expanded={notesOpen} aria-label={notes.length ? `Értesítések (${notes.length})` : "Értesítések"} title="Értesítések" className={`relative flex h-8 w-8 items-center justify-center rounded-full bg-card ${notes.length ? "text-foreground" : "text-muted-foreground"}`}>
+          <button type="button" onClick={() => { if (notesOpen) closeNotes(); else { setMenuOpen(false); setNotesOpen(true); } }} aria-haspopup="dialog" aria-expanded={notesOpen} aria-label={shownNotes.length ? `Értesítések (${shownNotes.length})` : "Értesítések"} title="Értesítések" className={`relative flex h-8 w-8 items-center justify-center rounded-full bg-card ${shownNotes.length ? "text-foreground" : "text-muted-foreground"}`}>
             <Bell className="h-4 w-4" aria-hidden="true" />
-            {notes.length > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-none text-primary-foreground">{notes.length}</span>}
+            {shownNotes.length > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-none text-primary-foreground">{shownNotes.length}</span>}
           </button>
           {notesOpen && (
             <div role="dialog" aria-label="Értesítések" className="absolute right-0 top-full z-30 mt-1.5 max-h-[min(20rem,60dvh)] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-2xl border border-border bg-popover p-1.5 shadow-2xl">
-              {notes.length ? notes.map((n) => (
-                <button key={n.id} type="button" onClick={() => { setRepo(n.repo); closeNotes(); }} className="flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left font-mono text-[11px]">
+              {shownNotes.length ? shownNotes.map((n) => (
+                <button key={n.live ? `live:${n.repo}` : n.id} type="button" onClick={() => { setRepo(n.repo); closeNotes(); }} className="flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left font-mono text-[11px]">
                   <span className="mt-px"><StatusIcon kind={n.kind} /></span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2"><span className="truncate font-bold text-foreground">{n.repo}</span><span className="shrink-0 text-muted-foreground">{noteTime(n.at)}</span></span>

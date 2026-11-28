@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Bell, ChevronDown, Copy, Download, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
-import { GitHub, planZip, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
+import { GitHub, planZip, type FileOp, type LatestRelease, type Plan, type Repo, type Run } from "@/lib/github";
 import { readZip, toBase64, patchTargets, applyPatchText, type LocalFile } from "@/lib/repo-files";
 import { loadToken, loadLegacyToken, clearToken } from "@/lib/token";
 import { hasVault } from "@/lib/lock";
@@ -68,7 +68,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [seenId, setSeenId] = useState<string | undefined>();
   const [active, setActive] = useState<Run[]>([]);
   const activeRef = useRef<Run[]>([]);
-  const buildingRef = useRef(false);
   const pokeRef = useRef<(() => Promise<void>) | null>(null);
   const actPhases = useRef<Record<string, string>>({});
   const patchFile = useRef<HTMLInputElement>(null);
@@ -119,7 +118,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
   const [notesOpen, setNotesOpen] = useState(false);
   const notesRef = useRef<HTMLDivElement>(null);
   const noteId = useRef(0);
-  const notify = (r: string, rs: Run[]) => setNotes((l) => [buildNote(++noteId.current, r, rs, Date.now()), ...l]);
+  // Egy futásról egyszer jön értesítés, akkor is, ha a build-követő és a figyelő is látta lezárulni.
+  const notified = useRef(new Set<number>());
+  const notify = (r: string, rs: { id: number; name: string; status: string; conclusion: string | null }[]) => {
+    const fresh = rs.filter((x) => !notified.current.has(x.id));
+    if (!fresh.length) return;
+    fresh.forEach((x) => notified.current.add(x.id));
+    setNotes((l) => [buildNote(++noteId.current, r, fresh, Date.now()), ...l]);
+  };
   const closeNotes = () => { setNotesOpen(false); setNotes([]); };
   // Appon belüli frissítés (csak az Android APK-ban): induláskor, előtérbe lépéskor (legfeljebb 10 percenként) és kézzel keres.
   const [update, setUpdate] = useState<AppRelease | null>(null);
@@ -198,7 +204,10 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     if (!repo) return;
     const r = repos.find((x) => x.full_name === repo);
     setBranch(r?.default_branch ?? "main");
-    gh.listBranches(repo).then(setBranches);
+    setBranches([]); // az előző repó ágai ne maradjanak a listában, amíg az újak megérkeznek
+    let alive = true;
+    gh.listBranches(repo).then((b) => { if (alive) setBranches(b); });
+    return () => { alive = false; };
   }, [repo]);
 
   // Az épp kiválasztott repó legfrissebb release-e; build végén újratöltjük.
@@ -218,7 +227,6 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", bump); };
   }, [repo]);
 
-  useEffect(() => { buildingRef.current = building; }, [building]);
   // Leállítás kérve egy-egy futásra (a Leállítás gombbal, vagy a build sáv listájából): futásonként követjük, mikor kérték.
   const [stopReq, setStopReq] = useState<Record<number, number>>({});
   const [, setStopTick] = useState(0);
@@ -282,7 +290,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
       let delay = 8000;
       if (document.visibilityState === "visible") {
         try {
-          const { open: now, closed } = await gh.runsOverview(repo, ticks++ % 6 === 0); // a teljes (szűrt listás) keresés csak minden 6. körben
+          const { open: now, closed } = await gh.runsOverview(repo, ticks++ % 6 === 0, panelIds.current); // a teljes (szűrt listás) keresés csak minden 6. körben; a build-követő futásait nem kérdezzük le másodszor
           if (!alive) return;
           const first_ = first;
           const fresh = now.filter((x) => !tracked.has(x.id) && !panelIds.current.has(x.id));
@@ -297,6 +305,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
             if (!alive) return;
             logPhases(done, actPhases.current, repo);
             add(`ACTION KÉSZ ${done.length ? outcome(done.map((x) => x.conclusion)) : "■"}: ${done.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ") || "lefutott"}`);
+            notify(repo, done); // a harangban a futó sor helyére a végeredmény kerül
             gone.forEach((x) => { tracked.delete(x.id); seenDone.add(x.id); });
             clearStopReq(gone.map((x) => x.id));
             setRelTick((n) => n + 1);
@@ -305,15 +314,15 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
           const unseen = closed.filter((x) => !seenDone.has(x.id));
           if (!first_) {
             const quick = unseen.filter((x) => !tracked.has(x.id) && !panelIds.current.has(x.id));
-            if (quick.length) { add(`Action lefutott: ${quick.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ")}`); setRelTick((n) => n + 1); }
+            if (quick.length) { add(`Action lefutott: ${quick.map((x) => `${x.name} → ${x.conclusion ?? x.status}`).join(", ")}`); notify(repo, quick); setRelTick((n) => n + 1); }
           }
           unseen.forEach((x) => seenDone.add(x.id));
           logPhases(mine, actPhases.current, repo);
           activeRef.current = mine;
           setActive(mine);
           errs = 0;
-          // Minél gyorsabban látszódjon az állapot: indulás után 1 mp, futás közben 5 mp, egyébként 8 mp.
-          delay = pollDelay({ sinceOpenMs: Date.now() - t0, anyOpen: now.length > 0 || buildingRef.current });
+          // Minél gyorsabban látszódjon az állapot: indulás után 1 mp, utána 8 mp (a kérés-korlát miatt nem sűrítjük tovább).
+          delay = pollDelay({ sinceOpenMs: Date.now() - t0 });
         } catch {
           errs++;
           delay = errorDelay(errs);
@@ -429,7 +438,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         fails++;
         if (fails === 1 || fails % 10 === 0) addTo(r, `Build állapot hiba: ${e.message}`);
       } finally { running = false; }
-      if (!stop) timer = setTimeout(tick, fails ? Math.min(2000 * 2 ** Math.min(fails, 4), 30000) : pollDelay({ sinceOpenMs: Date.now() - t0, anyOpen: true }));
+      if (!stop) timer = setTimeout(tick, fails ? Math.min(2000 * 2 ** Math.min(fails, 4), 30000) : pollDelay({ sinceOpenMs: Date.now() - t0 }));
     };
     // Visszalépéskor / kézi frissítéskor azonnal újra lekérdez (a háttérben az időzítők lassulnak). A feladott követés újraindul.
     const wake = () => {
@@ -602,7 +611,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         if (!zipFiles.length) throw new Error("Nincs ZIP betöltve.");
         add(`Feltöltés: ${zipFiles.length} fájl → ${repo}@${branch} (${mode === "replace" ? "teljes csere" : "beillesztés"})`);
         setStep("Összevetés a repó jelenlegi állapotával");
-        const { files: remote, truncated } = await gh.getTree(repo, branch);
+        const { files: remote, modes, truncated } = await gh.getTree(repo, branch);
         if (truncated && mode === "replace") throw new Error("A repó túl nagy a teljes összevetéshez (a GitHub csonkolta a fájllistát), ezért teljes cserét nem végzek. Használd a Beillesztés módot.");
         const plan = await planZip(zipFiles, remote, mode);
         // Ami már pontosan így van a repóban, azt is be lehet tenni újra: üres commit készül, ami újraindítja a push-ra figyelő workflow-kat.
@@ -612,12 +621,14 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         // Unchanged files keep their existing blob: no need to upload them again.
         const dirty = new Set([...plan.added, ...plan.modified]);
         const toSend = zipFiles.filter((f) => dirty.has(f.path));
-        const done: { path: string; sha: string }[] = zipFiles.filter((f) => !dirty.has(f.path) && remote[f.path]).map((f) => ({ path: f.path, sha: remote[f.path]! }));
+        // A már létező fájlok megtartják a módjukat (futtatható bit, szimbolikus link): a teljes csere ne írja át őket.
+        const withMode = (f: { path: string; sha: string }): FileOp => (modes[f.path] ? { ...f, mode: modes[f.path]! } : f);
+        const done: FileOp[] = zipFiles.filter((f) => !dirty.has(f.path) && remote[f.path]).map((f) => withMode({ path: f.path, sha: remote[f.path]! }));
         const B = 20;
         for (let k = 0; k < toSend.length; k += B) {
           const batch = toSend.slice(k, k + B);
           setStep(`Fájlok küldése ${k + batch.length}/${toSend.length}`);
-          done.push(...(await gh.uploadBlobs(repo, batch)));
+          done.push(...(await gh.uploadBlobs(repo, batch)).map(withMode));
           batch.forEach((f) => add(`  ↑ ${f.path}`));
           setPct(Math.round(((k + batch.length) / toSend.length) * 90));
         }
@@ -632,6 +643,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         setStage(2); setStep("Eredeti fájlok letöltése"); setPct(20);
         add(`Patch: ${t.length} fájl, eredeti tartalom letöltése…`);
         const src = await gh.getFiles(repo, branch, paths);
+        const modes = await gh.getTree(repo, branch).then((t) => t.modes, () => ({} as Record<string, string>)); // a módosított fájl megtartja a módját
         const { ops, errors, skipped } = applyPatchText(patch, src);
         skipped.forEach((f) => add(`  = ${f}: már így van a repóban, nincs mit módosítani`));
         errors.forEach((e) => add(e));
@@ -644,7 +656,7 @@ function Main({ token, me, setMe, onLogout }: { token: string; me: { login: stri
         setStep("Commit létrehozása és ág frissítése"); setPct(70);
         const r = await gh.commitFiles({
           repo, branch, mode: "merge", message: message || "Apply patch",
-          files: ops.map((o) => (o.delete ? { path: o.path, delete: true } : { path: o.path, base64: toBase64(o.content ?? "") })),
+          files: ops.map((o): FileOp => (o.delete ? { path: o.path, delete: true } : { path: o.path, base64: toBase64(o.content ?? ""), ...(modes[o.path] ? { mode: modes[o.path]! } : {}) })),
         });
         add(r.empty ? `FINISH ✔ üres commit (nincs tartalmi változás) · ${r.url}` : `FINISH ✔ ${r.count} módosítás · ${r.url}`);
       }

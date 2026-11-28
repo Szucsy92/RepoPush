@@ -25,13 +25,14 @@ ZIP-ből vagy patch/diff fájlból közvetlenül frissítheted a saját GitHub r
 A „Token megjegyzése ezen az eszközön” kapcsolóval a token az eszközön marad. Kikapcsolva a böngészőfül bezárásakor törlődik. A „Kijelentkezés” gomb törli.
 
 ## Telepítés appként (PWA)
+_Csak akkor érhető el, ha a `bun run build` által készített `dist/` mappát magad hosztolod: a repó nem tartalmaz automatikus webes kiadást (nincs GitHub Pages workflow), az Android APK a fő célja._
 - **Android / Chrome:** nyisd meg az oldalt, majd menü → **Alkalmazás telepítése** / **Hozzáadás a kezdőképernyőhöz**.
 - **iPhone / Safari:** Megosztás → **Főképernyőhöz adás**.
 - **Asztali Chrome / Edge:** a címsor jobb oldalán a telepítés ikon.
 
 ## Fejlesztés
 ```sh
-bun install      # a bun.lock ehhez készült; npm install a rolldown override miatt összeomolhat
+bun install      # a bun.lock ehhez készült; npm install a rolldown override miatt összeomolhat. Az Android workflow a bun.lock-ot magától frissíti és visszacommitolja
 bun run dev      # http://localhost:8080
 bun run test
 bun run build    # dist/
@@ -49,6 +50,3 @@ Az APK-t a GitHub Actions építi (`.github/workflows/android.yml`), a webes app
 6. **Appon belüli frissítés (OTA):** az APK-ban az app a saját repója legfrissebb release-ét nézi (induláskor, előtérbe lépéskor legfeljebb 10 percenként, és a profil menü „Frissítés keresése” sorával kézzel). A release címkéjének végén lévő szám (`v1.0.<szám>`) a futás sorszáma, ez egyben az APK versionCode-ja; ha a release száma nagyobb a telepítettnél, felugrik az „Új frissítés elérhető” ablak. A „Telepítés” az APK-t az appban tölti le (folyamatjelzővel), majd megnyílik a rendszer telepítője; az első alkalommal az „ismeretlen forrásból telepítés” engedélyét kell megadni ennél az appnál. A „Később” elhalasztja az adott release-t (újabbnál újra felugrik). Ha az appon belüli letöltés nem sikerül (pl. privát repó), a böngészős letöltés gombja jelenik meg. Csak a `github.com/.../releases/download/.../*.apk` címek fogadhatók el, és csak az app saját csomagnevű, újabb APK-ja kerül a telepítőhöz; az aláírást a rendszer ellenőrzi (más kulccsal aláírt APK nem települ). Weben és iOS-en nincs önfrissítés.
 
 Az appon belüli „▶ Friss build indítása” gomb az Android workflow-t is elindítja (minden `workflow_dispatch` workflow-t indít).
-
-## GitHub Pages
-A `.github/workflows/deploy.yml` minden `main` push után lefuttatja a teszteket, megépíti az appot, és kiteszi GitHub Pagesre. A repóban: **Settings → Pages → Source: GitHub Actions**. A relatív elérési út miatt bármilyen `/<repo>/` alatt fut.

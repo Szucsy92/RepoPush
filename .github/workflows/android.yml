@@ -268,3 +268,16 @@ jobs:
           name: ${{ env.RELEASE_NAME }}
           body: Telepíthető, aláírt Android APK. Letöltés után nyisd meg a telefonon (ismeretlen forrásból telepítés engedélyezése kellhet).
           files: ${{ env.APK_FILE }}
+
+      # A bun.lock helyben nem kell kézzel frissíteni: ha a `bun install` módosította (új vagy törölt csomag), a sikeres build után
+      # visszacommitoljuk. A GITHUB_TOKEN-nel küldött push nem indít új workflow-t. Ha nem sikerül, figyelmeztetés marad, a build így is kész.
+      - name: bun.lock frissítése (ha változott)
+        if: success()
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- bun.lock; then echo "A bun.lock naprakész."; exit 0; fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add bun.lock
+          git commit -q -m "Update bun.lock [skip ci]"
+          git push -q origin "HEAD:${GITHUB_REF_NAME}" || echo "::warning::A bun.lock visszaírása nem sikerült (védett ág, vagy közben új commit érkezett). Helyben: bun install, majd commit."
